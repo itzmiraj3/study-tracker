@@ -1,0 +1,3843 @@
+/* Welcome page: log in, create an account or pick a saved account. Everything is stored in this browser only. */
+(function(){
+  const RK = 'studyTracker.accounts';
+  const pkey = id => id==='main' ? 'studyTracker.profile' : 'studyTracker.profile@'+id;
+  let reg = null; try{ reg = JSON.parse(localStorage.getItem(RK)||'null'); }catch(e){}
+  if(!reg || !Array.isArray(reg.list) || !reg.list.length) reg = {list:[{id:'main'}], active:'main'};
+  if(reg.active===undefined) reg.active = 'main';
+  if(reg.active!==null && !reg.list.some(a=>a.id===reg.active)) reg.active = 'main';
+  if(!reg.list.some(a=>a.id==='main')) reg.list.unshift({id:'main'});
+  /* The password hash (pw) is kept in the registry only, so it never goes into a profile or a backup file */
+  const write = r => { try{ localStorage.setItem(RK, JSON.stringify({list:r.list.map(a => { const o = {id:a.id}; if(a.pw) o.pw = a.pw; if(a.uid) o.uid = a.uid; return o; }), active:r.active})); return true; }catch(e){ return false; } };
+  const profOf = id => { try{ return JSON.parse(localStorage.getItem(pkey(id))||'null')||{}; }catch(e){ return {}; } };
+  const nameOf = id => String(profOf(id).name||'').trim();
+  window.__ACC = {id: reg.active, reg, pkey, write};
+  /* Show this page when logged out, or when the active account has no registered name yet */
+  /* ---- cloud sync: a cloud account's study data is also kept in Firestore. Once per tab the page loads the latest copy, then each change is sent a moment after it is made. ---- */
+  const uidOf = a => a ? (a.uid || (String(a.id).indexOf('g_') === 0 ? String(a.id).slice(2) : '')) : '';
+  const activeEntry = reg.active ? reg.list.find(a => a.id === reg.active) : null;
+  const activeUid = uidOf(activeEntry);
+  let canSession = true, syncedMark = null;
+  try{ syncedMark = sessionStorage.getItem('studyTracker.synced'); }catch(e){ canSession = false; }
+  const PAUSE_KEY = 'studyTracker.syncPaused', PEND = id => 'studyTracker.pendingUpload@' + id;
+  let pausedMark = null; try{ pausedMark = sessionStorage.getItem(PAUSE_KEY); }catch(e){}
+  const isPaused = !!activeUid && pausedMark !== null && pausedMark === reg.active;
+  const needPull = !!activeUid && canSession && syncedMark !== reg.active && !isPaused;
+  let PAUSED = isPaused ? reg.active : null;   /* account whose cloud sync is paused in this tab (its download failed) */
+  window.__SYNC_PAUSED = PAUSED;
+  window.__STOP = reg.active === null || !nameOf(reg.active) || needPull;
+  /* the marker says this load already fetched the latest copy: use it once, so the next page open fetches again */
+  if(syncedMark !== null && syncedMark === reg.active){ try{ sessionStorage.removeItem('studyTracker.synced'); }catch(e){} }
+  /* Keys of one account are stored in Firestore under short names: 'v2' (study data) and 'profile', plus any suffix */
+  const relOf = (k, id) => { const B = 'studyTracker.v2@' + id, P = 'studyTracker.profile@' + id;
+    if(k === B || k.indexOf(B + '.') === 0) return 'v2' + k.slice(B.length);
+    if(k === P || k.indexOf(P + '.') === 0) return 'profile' + k.slice(P.length);
+    return null; };
+  const keyOf = (rel, id) => /^v2(\.|$)/.test(rel) ? 'studyTracker.v2@' + id + rel.slice(2)
+    : /^profile(\.|$)/.test(rel) ? 'studyTracker.profile@' + id + rel.slice(7) : null;
+  const dataCol = uid => fbDb.collection('users').doc(uid).collection('data');
+  let SYNC = null, qKeys = new Set(), qTimer = 0;
+  const flushSync = () => { clearTimeout(qTimer); if(!SYNC || !qKeys.size) return;
+    const keys = [...qKeys]; qKeys.clear(); const b = fbDb.batch(), col = dataCol(SYNC.uid);
+    keys.forEach(k => { const rel = relOf(k, SYNC.id); if(rel === null) return; const v = localStorage.getItem(k);
+      if(v === null) b.delete(col.doc(rel)); else b.set(col.doc(rel), {v: v}); });
+    b.commit().catch(e => console.warn('Study data sync failed:', e && e.code || e)); };
+  const markSync = k => {
+    if(PAUSED !== null){ if(relOf(k, PAUSED) !== null){ try{ localStorage.setItem(PEND(PAUSED), '1'); }catch(e){} } return; }
+    if(!SYNC || relOf(k, SYNC.id) === null) return; qKeys.add(k); clearTimeout(qTimer); qTimer = setTimeout(flushSync, 800); };
+  const _setItem = Storage.prototype.setItem, _removeItem = Storage.prototype.removeItem;
+  Storage.prototype.setItem = function(k, v){ _setItem.call(this, k, v); if(this === localStorage) markSync(k); };
+  Storage.prototype.removeItem = function(k){ _removeItem.call(this, k); if(this === localStorage) markSync(k); };
+  window.addEventListener('pagehide', flushSync);
+  const _signOut = fbAuth.signOut.bind(fbAuth);
+  fbAuth.signOut = () => { flushSync(); return _signOut(); };
+  if(activeUid && !needPull && PAUSED === null) SYNC = {id: reg.active, uid: activeUid};
+  if(!window.__STOP) return;
+  document.documentElement.lang = 'en';
+const BD_DIV = {
+  "Dhaka": ["Dhaka","Faridpur","Gazipur","Gopalganj","Kishoreganj","Madaripur","Manikganj","Munshiganj","Narayanganj","Narsingdi","Rajbari","Shariatpur","Tangail"],
+  "Chattogram": ["Bandarban","Brahmanbaria","Chandpur","Chattogram","Cumilla","Cox's Bazar","Feni","Khagrachhari","Lakshmipur","Noakhali","Rangamati"],
+  "Rajshahi": ["Bogura","Joypurhat","Naogaon","Natore","Chapainawabganj","Pabna","Rajshahi","Sirajganj"],
+  "Khulna": ["Bagerhat","Chuadanga","Jashore","Jhenaidah","Khulna","Kushtia","Magura","Meherpur","Narail","Satkhira"],
+  "Barishal": ["Barguna","Barishal","Bhola","Jhalokati","Patuakhali","Pirojpur"],
+  "Sylhet": ["Habiganj","Moulvibazar","Sunamganj","Sylhet"],
+  "Rangpur": ["Dinajpur","Gaibandha","Kurigram","Lalmonirhat","Nilphamari","Panchagarh","Rangpur","Thakurgaon"],
+  "Mymensingh": ["Jamalpur","Mymensingh","Netrokona","Sherpur"]
+};
+const ADDR = ["Australia", "Bahrain", "Bangladesh", "Bhutan", "Canada", "China", "Germany", "India", "Indonesia", "Italy", "Japan", "Kuwait", "Malaysia", "Maldives", "Myanmar", "Nepal", "Netherlands", "Oman", "Pakistan", "Philippines", "Qatar", "Saudi Arabia", "Singapore", "South Africa", "South Korea", "Spain", "Sri Lanka", "Thailand", "United Arab Emirates", "United Kingdom", "United States"];
+  const CC = [['Bangladesh','+8801',9,9],['India','+91',10,10],['Pakistan','+92',10,10],['Nepal','+977',10,10],['United States or Canada','+1',10,10],['United Kingdom','+44',10,10],['Saudi Arabia','+966',9,9],['United Arab Emirates','+971',9,9],['Qatar','+974',8,8],['Oman','+968',8,8],['Kuwait','+965',8,8],['Malaysia','+60',9,10],['Singapore','+65',8,8],['Australia','+61',9,9],['Other (include country code)','+',8,15]];
+  const MON_EN = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const MON_BN = ['জানুয়ারি','ফেব্রুয়ারি','মার্চ','এপ্রিল','মে','জুন','জুলাই','আগস্ট','সেপ্টেম্বর','অক্টোবর','নভেম্বর','ডিসেম্বর'];
+  const TX = {
+    en: {
+      brandName:'Study Time Tracker', termsLink:'Terms & Conditions', termsT:'Terms & Conditions', termsClose:'Close', socialExists:'This email was created with another sign-in method. Log in with that method first.', lgNoAcc:'Don’t have an account?', wBrandA:'Study', wBrandB:'Tracker', wBrandTag:'Plan • Study • Achieve', remTxt:'Remember Me', fbBtnTxt:'Facebook', apBtnTxt:'Apple', rNoAcc:'Already have an account?', goLog2:'Login Now', lTerms:'I agree to the', eTerms:'Please accept the Terms & Conditions to continue.', pwWk:'Weak', pwFr:'Fair', pwSt:'Strong',
+      bootAuth:'Signing you in…', bootData:'Loading your study data…', bootSlow:'Taking a little longer than usual. Still loading…', bootErrT:'Could not load your cloud data', bootErrS:'Check your internet connection. Your data is kept safely in the cloud and on this device.', bootRetry:'Try again', bootUseLocal:'Use this device copy', bootOut:'Log out', decideT:'Unsynced changes on this device', decideS:'Choose which copy to keep. Using the cloud copy drops the changes made offline on this device. Sending this device copy replaces the cloud copy.', decideCloud:'Use cloud copy', decideLocal:'Send this device copy to cloud',
+      fpBtn:'Forgot Password?', rsL1:'Email or username', rsBtn:'Send reset link', rsBack:'Back to log in', rsTitle:'Reset password', rsSub:'We will send a link to your email so you can set a new password.', rsSent:'If an account exists for this email, a reset link has been sent. Check your inbox and spam folder.',
+      tabLog:'Login', tabReg:'Register', gOr:'or continue with', logTitle:'Log in', logSub:'Enter the username and password you chose when you created the account.',
+      regTitle:'Create account', regSub:'Three short steps. Everything is saved on this device only.',
+      savedTitle:'Accounts on this device', savedSub:'Tap Use to fill in the username. Delete removes all data of that account from this browser.',
+      savedLbl:'Accounts on this device', savedBack:'Back to log in', useAcc:'Use', delAcc:'Delete', delSure:'Tap again to confirm', delErr:'This account could not be deleted. Please try again.',
+      lgL1:'Username', lgH1:'The username you chose when you created the account.', lgL2:'Password', lgBtn:'Login',
+      lgNoAcc:'Don’t have an account?', goReg:'Register Now',
+      lgLegacy:'This account was made before passwords were added. The password you type now will be saved for this account.',
+      eUserReq:'Enter your username.', ePassReq:'Enter your password.', noAcc:'No account with this username on this device.', eWrong:'The password is not correct.', eNewPass:'Use at least 6 characters, with a letter and a number.',
+      steps:['Step 1 of 3: Account','Step 2 of 3: About you','Step 3 of 3: Contact and address'],
+      h0:'Account details', h1:'About you', h2:'Contact and address',
+      lUser:'Username', hUser:'3 to 20 letters, numbers or underscore (_). Example: rahim_01',
+      lPass:'Password', hPass:'At least 6 characters, with a letter and a number.', lPass2:'Confirm password',
+      lName:'Full name', hName:'This name is shown on your profile.', lDob:'Date of birth', lDay:'Day', lMon:'Month', lYear:'Year',
+      lGender:'Gender', lSchool:'School name (optional)',
+      lPhone:'Phone number', lEmail:'Email', lCountry:'Country', lDiv:'Division', lDist:'District', lVill:'Street address, village or house',
+      lDivO:'State or region', lDistO:'City or district',
+      rBack:'Back', next:'Continue', done:'Create account', show:'Show', hide:'Hide',
+      pick:'Choose', nSpec:'Not specified', gM:'Male', gF:'Female', gO:'Other', gX:'Prefer not to say', other:'Other',
+      eUser:'Use 3 to 20 letters, numbers or underscore.', eTaken:'This username is already used on this device.', ePass:'Use at least 6 characters, with a letter and a number.', eMatch:'The two passwords do not match.',
+      eName:'Enter your full name.', eDob:'Enter a valid date of birth.', ePhone:'Enter a valid phone number for the selected country.', eEmail:'Enter a valid email address.',
+      eDiv:'Choose or type a division.', eDist:'Choose or type a district.', eVill:'Enter your street address, village or house.',
+      saveErr:'Could not save. Storage may be full or blocked.', noCrypto:'This browser cannot store passwords safely. Please open the app in a newer browser.'
+    },
+    bn: {
+      bootAuth:'আপনাকে সাইন ইন করা হচ্ছে…', bootData:'আপনার পড়াশোনার ডেটা লোড হচ্ছে…', bootSlow:'একটু বেশি সময় লাগছে। লোড হচ্ছে…', bootErrT:'ক্লাউড ডেটা লোড করা যায়নি', bootErrS:'ইন্টারনেট সংযোগ দেখুন। আপনার ডেটা ক্লাউডে ও এই ডিভাইসে নিরাপদ আছে।', bootRetry:'আবার চেষ্টা করুন', bootUseLocal:'এই ডিভাইসের কপি ব্যবহার করুন', bootOut:'লগআউট', decideT:'এই ডিভাইসে ক্লাউডে না যাওয়া পরিবর্তন আছে', decideS:'কোন কপি রাখবেন বেছে নিন। ক্লাউডের কপি নিলে এই ডিভাইসে অফলাইনে করা পরিবর্তন বাদ যাবে। এই ডিভাইসের কপি পাঠালে ক্লাউডের কপি বদলে যাবে।', decideCloud:'ক্লাউডের ডেটা নিন', decideLocal:'এই ডিভাইসের ডেটা ক্লাউডে পাঠান',
+      fpBtn:'পাসওয়ার্ড ভুলে গেছেন?', rsL1:'ইমেইল বা ইউজারনেম', rsBtn:'রিসেট লিংক পাঠান', rsBack:'লগইনে ফিরে যান', rsTitle:'পাসওয়ার্ড রিসেট', rsSub:'নতুন পাসওয়ার্ড সেট করতে আমরা আপনার ইমেইলে একটি লিংক পাঠাব।', rsSent:'এই ইমেইলের অ্যাকাউন্ট থাকলে রিসেট লিংক পাঠানো হয়েছে। Inbox ও Spam ফোল্ডার দেখুন।',
+      brandName:'স্টাডি টাইম ট্র্যাকার', termsLink:'শর্তাবলি', termsT:'শর্তাবলি', termsClose:'বন্ধ করুন', socialExists:'এই ইমেইল আগে অন্য পদ্ধতিতে খোলা হয়েছে। প্রথমে সেই পদ্ধতিতে লগইন করুন।', wBrandA:'স্টাডি', wBrandB:'ট্র্যাকার', wBrandTag:'পরিকল্পনা • পড়া • অর্জন', remTxt:'আমাকে মনে রাখুন', fbBtnTxt:'Facebook', apBtnTxt:'Apple', rNoAcc:'আগে থেকেই অ্যাকাউন্ট আছে?', goLog2:'লগইন করুন', lTerms:'আমি সম্মত আছি', eTerms:'এগিয়ে যেতে শর্তাবলিতে সম্মতি দিন।', pwWk:'দুর্বল', pwFr:'মোটামুটি', pwSt:'শক্তিশালী',
+      tabLog:'লগইন', tabReg:'নতুন অ্যাকাউন্ট', gOr:'অথবা', logTitle:'লগইন', logSub:'অ্যাকাউন্ট খোলার সময় যে ইউজারনেম ও পাসওয়ার্ড দিয়েছিলেন, সেগুলো লিখুন।',
+      regTitle:'নতুন অ্যাকাউন্ট', regSub:'তিনটি ছোট ধাপে তথ্য দিন। সব তথ্য শুধু এই ডিভাইসে থাকবে।',
+      savedTitle:'এই ডিভাইসের অ্যাকাউন্ট', savedSub:'ইউজারনেম বসাতে ব্যবহার করুন চাপুন। মুছুন চাপলে ওই অ্যাকাউন্টের সব তথ্য এই ব্রাউজার থেকে মুছে যাবে।',
+      savedLbl:'এই ডিভাইসের অ্যাকাউন্ট', savedBack:'লগইনে ফিরুন', useAcc:'ব্যবহার করুন', delAcc:'মুছুন', delSure:'নিশ্চিত করতে আবার চাপুন', delErr:'এই অ্যাকাউন্ট মোছা যায়নি। আবার চেষ্টা করুন।',
+      lgL1:'ইউজারনেম', lgH1:'অ্যাকাউন্ট খোলার সময় যে ইউজারনেম দিয়েছিলেন।', lgL2:'পাসওয়ার্ড', lgBtn:'লগইন',
+      lgNoAcc:'অ্যাকাউন্ট নেই?', goReg:'নতুন অ্যাকাউন্ট খুলুন',
+      lgLegacy:'এই অ্যাকাউন্টটি পাসওয়ার্ড যোগ হওয়ার আগে তৈরি হয়েছিল। এখন যে পাসওয়ার্ড লিখবেন, সেটিই এই অ্যাকাউন্টের জন্য সংরক্ষিত হবে।',
+      eUserReq:'ইউজারনেম লিখুন।', ePassReq:'পাসওয়ার্ড লিখুন।', noAcc:'এই ডিভাইসে এই ইউজারনেমের কোনো অ্যাকাউন্ট নেই।', eWrong:'পাসওয়ার্ড সঠিক নয়।', eNewPass:'কমপক্ষে ৬টি অক্ষর, একটি ইংরেজি অক্ষর ও একটি সংখ্যা ব্যবহার করুন।',
+      steps:['ধাপ ১ / ৩: অ্যাকাউন্ট','ধাপ ২ / ৩: আপনার সম্পর্কে','ধাপ ৩ / ৩: যোগাযোগ ও ঠিকানা'],
+      h0:'অ্যাকাউন্টের তথ্য', h1:'আপনার সম্পর্কে', h2:'যোগাযোগ ও ঠিকানা',
+      lUser:'ইউজারনেম', hUser:'৩ থেকে ২০টি অক্ষর, সংখ্যা বা আন্ডারস্কোর (_)। উদাহরণ: rahim_01',
+      lPass:'পাসওয়ার্ড', hPass:'কমপক্ষে ৬টি অক্ষর, তার মধ্যে একটি ইংরেজি অক্ষর ও একটি সংখ্যা থাকতে হবে।', lPass2:'পাসওয়ার্ড আবার লিখুন',
+      lName:'পুরো নাম', hName:'আপনার প্রোফাইলে এই নাম দেখাবে।', lDob:'জন্ম তারিখ', lDay:'দিন', lMon:'মাস', lYear:'বছর',
+      lGender:'লিঙ্গ', lSchool:'স্কুলের নাম (ঐচ্ছিক)',
+      lPhone:'ফোন নম্বর', lEmail:'ইমেইল', lCountry:'দেশ', lDiv:'বিভাগ', lDist:'জেলা', lVill:'রাস্তা, গ্রাম বা বাড়ির ঠিকানা',
+      lDivO:'রাজ্য বা অঞ্চল', lDistO:'শহর বা জেলা',
+      rBack:'পেছনে', next:'পরবর্তী', done:'অ্যাকাউন্ট খুলুন', show:'দেখান', hide:'লুকান',
+      pick:'বাছুন', nSpec:'উল্লেখ নেই', gM:'পুরুষ', gF:'মহিলা', gO:'অন্যান্য', gX:'বলতে চাই না', other:'অন্যান্য',
+      eUser:'৩ থেকে ২০টি অক্ষর, সংখ্যা বা আন্ডারস্কোর ব্যবহার করুন।', eTaken:'এই ইউজারনেম এই ডিভাইসে আগেই ব্যবহার হয়েছে।', ePass:'কমপক্ষে ৬টি অক্ষর, একটি ইংরেজি অক্ষর ও একটি সংখ্যা ব্যবহার করুন।', eMatch:'দুটি পাসওয়ার্ড মিলছে না।',
+      eName:'আপনার পুরো নাম লিখুন।', eDob:'সঠিক জন্ম তারিখ লিখুন।', ePhone:'নির্বাচিত দেশের জন্য সঠিক ফোন নম্বর লিখুন।', eEmail:'সঠিক ইমেইল ঠিকানা লিখুন।',
+      eDiv:'বিভাগ বাছুন বা লিখুন।', eDist:'জেলা বাছুন বা লিখুন।', eVill:'রাস্তা, গ্রাম বা বাড়ির ঠিকানা লিখুন।',
+      saveErr:'সংরক্ষণ করা যায়নি। স্টোরেজ ভরা বা বন্ধ থাকতে পারে।', noCrypto:'এই ব্রাউজারে পাসওয়ার্ড নিরাপদভাবে রাখা যায় না। নতুন ব্রাউজারে অ্যাপটি খুলুন।'
+    }
+  };
+  const T = {};
+  const $ = id => document.getElementById(id);
+  let LANG = 'en'; try{ LANG = localStorage.getItem('studyTracker.lang') === 'bn' ? 'bn' : 'en'; }catch(e){}
+  let cur = 'log', step = 0;
+  /* Google accounts (id starts with g_) log in with the Google button, not with a username */
+  /* Every named account is listed, Google ones too (Use opens Google for them) */
+  const savedList = () => reg.list.filter(a => nameOf(a.id));
+  const val = id => $(id).value.replace(/\s+/g,' ').trim();
+  const pad = n => String(n).padStart(2,'0'), now = new Date();
+  const opt = (sel, v, t) => { const o = document.createElement('option'); o.value = v; o.textContent = t; sel.appendChild(o); };
+  /* Refills a dropdown and keeps the value that was picked, so a language switch does not lose it */
+  const fill = (sel, pairs) => { const v = sel.value; sel.options.length = 0; pairs.forEach(p => opt(sel, p[0], p[1])); if(pairs.some(p => p[0] === v)) sel.value = v; };
+  const err = m => { $('rErr').textContent = m; return false; };
+  const lgErr = m => { $('lgErr').textContent = m; };
+  const sayErr = m => { if($('formReg').hidden) lgErr(m); else err(m); };
+  const hasCrypto = () => !!(window.crypto && window.crypto.subtle && window.TextEncoder);
+  const hex = b => Array.from(b, x => x.toString(16).padStart(2,'0')).join('');
+  const unhex = h => Uint8Array.from(h.match(/../g), x => parseInt(x, 16));
+  /* Passwords are stored as PBKDF2-SHA-256 hashes with a random salt: "salt:hash" */
+  const hashPw = async (pw, saltHex) => {
+    const salt = saltHex ? unhex(saltHex) : crypto.getRandomValues(new Uint8Array(16));
+    const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, ['deriveBits']);
+    const bits = await crypto.subtle.deriveBits({name:'PBKDF2', salt, iterations:150000, hash:'SHA-256'}, key, 256);
+    return hex(salt) + ':' + hex(new Uint8Array(bits)); };
+  const checkPw = async (p, stored) => (await hashPw(p, stored.split(':')[0])) === stored;
+  const pwOk = p => /^(?=.*[A-Za-z])(?=.*\d).{6,64}$/.test(p);
+  const isG = id => String(id).indexOf('g_') === 0;
+  const emailOf = id => String(((profOf(id).info) || {}).email || '').trim().toLowerCase();
+  const takenUser = u => reg.list.some(a => String(profOf(a.id).user||'').toLowerCase() === u.toLowerCase());
+  const takenEmail = e => { const k = String(e||'').trim().toLowerCase(); return !!k && reg.list.some(a => nameOf(a.id) && emailOf(a.id) === k); };
+  /* Finds an account by username OR email, ignoring case. A username cannot contain @, so both fit in one box. */
+  const findAcc = u => { const k = String(u||'').trim().toLowerCase(); if(!k) return null;
+    return reg.list.find(a => nameOf(a.id) && (String(profOf(a.id).user||'').toLowerCase() === k || emailOf(a.id) === k)) || null; };
+  const withTimeout = (p, ms) => new Promise((res, rej) => { const t = setTimeout(() => rej(new Error('timeout')), ms);
+    p.then(v => { clearTimeout(t); res(v); }, e => { clearTimeout(t); rej(e); }); });
+  /* The sign-in email for what was typed: an email as typed, or the email stored for this username */
+  const resolveEmail = async (u, a) => {
+    if(a && emailOf(a.id)) return emailOf(a.id);
+    if(u.indexOf('@') > -1) return u.toLowerCase();
+    if(!/^[A-Za-z0-9_]{3,20}$/.test(u)) return '';
+    const s = await fbDb.collection('usernames').doc(u.toLowerCase()).get();
+    return s.exists ? String((s.data() || {}).email || '') : ''; };
+  const cloudErr = x => { const c = (x && x.code) || '';
+    if(['auth/invalid-credential','auth/wrong-password','auth/user-not-found','auth/invalid-email'].indexOf(c) > -1) return T.eCreds;
+    if(c === 'auth/too-many-requests') return T.eTooMany;
+    return T.netErr + (c ? ' (' + c + ')' : ''); };
+  /* Loads this account's data from the cloud. An empty cloud copy means this is the first device, so this device's copy is uploaded. */
+  const cloudPull = async (id, uid) => {
+    const snap = await dataCol(uid).get();
+    if(snap.empty){ await cloudUpload(id, uid); return; }
+    const remote = {};
+    snap.forEach(d => { const k = keyOf(d.id, id); if(k !== null) remote[k] = String((d.data() || {}).v || ''); });
+    for(let i = localStorage.length - 1; i >= 0; i--){ const k = localStorage.key(i);
+      if(relOf(k, id) !== null && !Object.prototype.hasOwnProperty.call(remote, k)) localStorage.removeItem(k); }
+    Object.keys(remote).forEach(k => localStorage.setItem(k, remote[k])); };
+  /* Downloads this account's copy. Returns null when the cloud has no copy yet. Nothing on this device changes here. */
+  const fetchRemote = async (id, uid) => {
+    const snap = await dataCol(uid).get();
+    if(snap.empty) return null;
+    const remote = {};
+    snap.forEach(d => { const k = keyOf(d.id, id); if(k !== null) remote[k] = String((d.data() || {}).v || ''); });
+    return remote; };
+  /* Replaces this device's copy with the downloaded copy. Only called after a successful download. */
+  const applyRemote = (id, remote) => {
+    for(let i = localStorage.length - 1; i >= 0; i--){ const k = localStorage.key(i);
+      if(relOf(k, id) !== null && !Object.prototype.hasOwnProperty.call(remote, k)) localStorage.removeItem(k); }
+    Object.keys(remote).forEach(k => localStorage.setItem(k, remote[k])); };
+  const cloudUpload = async (id, uid) => {
+    const keys = []; for(let i = 0; i < localStorage.length; i++){ const k = localStorage.key(i); if(relOf(k, id) !== null) keys.push(k); }
+    if(!keys.length) return;
+    const b = fbDb.batch(), col = dataCol(uid);
+    keys.forEach(k => b.set(col.doc(relOf(k, id)), {v: localStorage.getItem(k) || ''}));
+    await b.commit(); };
+  /* Creates a cloud account. The username must be free; the email is checked by Firebase Auth. */
+  const cloudCreate = async (uname, mail, pw) => {
+    const key = uname.toLowerCase(), ref = fbDb.collection('usernames').doc(key);
+    try{
+      if((await ref.get()).exists) return {err: 'user'};
+      let cred;
+      try{ cred = await fbAuth.createUserWithEmailAndPassword(mail, pw); }
+      catch(x){ const c = (x && x.code) || ''; return {err: c === 'auth/email-already-in-use' ? 'email' : c === 'auth/weak-password' ? 'weak' : 'net', code: c}; }
+      try{ await ref.set({uid: cred.user.uid, email: mail}); }
+      catch(x){ try{ await cred.user.delete(); }catch(e){} return {err: 'user'}; }
+      return {uid: cred.user.uid};
+    }catch(x){ return {err: 'net'}; } };
+  /* Google account that already has an email and password: the password sign-in is completed first, then Google is linked */
+  let pendingLink = null;
+  /* After any cloud sign-in: link the pending Google sign-in, load this account's data, then open the app. Returns an error text on failure. */
+  /* ---- faster login ----
+     The sign-in shows a dashboard-shaped loading screen at once. The study data downloads behind it, and the app opens only after that
+     download has finished, so no screen shows data that was not just loaded. A failed download never enables uploads: the account stays
+     paused for this tab and the user decides what happens next. */
+  const BOOT_MS = 10000;
+  const pause = ms => new Promise(r => setTimeout(r, ms));
+  const bsMsg = $('bsMsg'), bsStatus = $('bsStatus'), bsErr = $('bsErr'), bsErrT = $('bsErrT'), bsErrS = $('bsErrS'), bsActs = $('bsActs'), bsShell = $('bootShell');
+  let slowT = 0;
+  const bootOn = msg => { clearTimeout(slowT); bsErr.hidden = true; bsStatus.hidden = false; bsActs.textContent = ''; bsMsg.textContent = msg;
+    bsShell.hidden = false; $('welcome').inert = true;
+    slowT = setTimeout(() => { if(!bsShell.hidden && !bsStatus.hidden) bsMsg.textContent = T.bootSlow; }, 4000); };
+  const bootOff = () => { clearTimeout(slowT); bsShell.hidden = true; $('welcome').inert = false; };
+  /* Shows a question or an error on the loading screen; resolves with the key of the button the user presses */
+  const bootAsk = (title, sub, choices) => new Promise(res => {
+    clearTimeout(slowT); bsStatus.hidden = true; bsErr.hidden = false; bsErrT.textContent = title; bsErrS.textContent = sub; bsActs.textContent = '';
+    choices.forEach(c => { const b = document.createElement('button'); b.type = 'button'; b.className = c.primary ? 'wbtn' : 'wlink'; b.textContent = c.label;
+      b.onclick = () => res(c.k); bsActs.appendChild(b); }); });
+  /* One download (or a first-device upload) for this account. Throws when the cloud cannot be reached in time. */
+  const syncNow = async (ent, uid, mode) => {
+    if(mode === 'upload'){ await withTimeout(cloudUpload(ent.id, uid), BOOT_MS); return; }
+    const remote = await withTimeout(fetchRemote(ent.id, uid), BOOT_MS);
+    if(remote === null) await withTimeout(cloudUpload(ent.id, uid), BOOT_MS);
+    else applyRemote(ent.id, remote); };
+  /* Opens an account behind the loading screen. Returns an error text, or '' once the reload into the app has started. */
+  const bootAccount = async (ent, uid, linkP) => {
+    const linkDone = linkP ? linkP.catch(() => {}) : Promise.resolve();
+    reg.active = ent.id;
+    let pend = false; try{ pend = localStorage.getItem(PEND(ent.id)) === '1'; }catch(e){}
+    try{
+      let mode = 'pull';
+      if(pend){ const pick = await bootAsk(T.decideT, T.decideS, [{k:'cloud', label:T.decideCloud, primary:true}, {k:'local', label:T.decideLocal}]);
+        mode = pick === 'local' ? 'upload' : 'pull'; }
+      for(;;){
+        bootOn(T.bootData);
+        let ok = false;
+        for(let tries = 0; tries < 2 && !ok; tries++){
+          try{ await Promise.all([syncNow(ent, uid, mode), linkDone]); ok = true; }
+          catch(e){ if(tries === 0) await pause(800); }
+        }
+        if(ok) break;
+        const pick = await bootAsk(T.bootErrT, T.bootErrS, [{k:'retry', label:T.bootRetry, primary:true}, {k:'paused', label:T.bootUseLocal}, {k:'out', label:T.bootOut}]);
+        if(pick === 'retry') continue;
+        if(pick === 'out'){ bootOff(); reg.active = null; write(reg); try{ await fbAuth.signOut(); }catch(e){} location.reload(); return ''; }
+        /* this device's copy is used; cloud sync stays paused for this tab and local changes are kept for a later decision */
+        try{ sessionStorage.setItem(PAUSE_KEY, ent.id); }catch(e){}
+        if(!write(reg)){ bootOff(); return T.saveErr; }
+        location.reload(); return ''; }
+      try{ localStorage.removeItem(PEND(ent.id)); }catch(e){}
+      try{ sessionStorage.removeItem(PAUSE_KEY); }catch(e){}
+      if(!nameOf(ent.id)){
+        reg.list = reg.list.filter(x => x !== ent); reg.active = null; write(reg); bootOff();
+        try{ await fbAuth.signOut(); }catch(e){}
+        return T.syncFail; }
+      try{ sessionStorage.setItem('studyTracker.synced', ent.id); }catch(e){}
+      if(!write(reg)){ bootOff(); return T.saveErr; }
+      location.reload(); return '';
+    }catch(e){ bootOff(); return T.netErr; } };
+  /* After any cloud sign-in: link the pending Google sign-in in parallel with the download, then open the account */
+  const finishCloud = async user => {
+    const cred = pendingLink && pendingLink.email === String(user.email || '').toLowerCase() ? pendingLink.cred : null;
+    const linkP = cred ? Promise.resolve().then(() => user.linkWithCredential(cred)) : null;
+    pendingLink = null;
+    let ent = reg.list.find(x => uidOf(x) === user.uid);
+    if(!ent){ ent = {id: 'c_' + user.uid, uid: user.uid}; reg.list.push(ent); }
+    return bootAccount(ent, user.uid, linkP); };
+  /* Accounts made before cloud sync: checked against the password kept in this browser */
+  const legacyLogin = async (a, p) => {
+    if(!hasCrypto()) return lgErr(T.noCrypto);
+    $('lgBtn').disabled = true;
+    try{
+      if(a.pw){ if(!(await checkPw(p, a.pw))) return lgErr(T.eWrong); }
+      else { if(!pwOk(p)) return lgErr(T.eNewPass); a.pw = await hashPw(p); }
+    }catch(x){ return lgErr(T.noCrypto); }
+    finally{ $('lgBtn').disabled = false; }
+    reg.active = a.id; enter(); };
+  const enter = () => { if(!write(reg)) return sayErr(T.saveErr); location.reload(); };
+  /* Removes an account and every key saved for it on this device, so it cannot come back from the list */
+  const forget = id => {
+    const base = id === 'main' ? 'studyTracker.v2' : 'studyTracker.v2@' + id, prof = pkey(id);
+    try{ const dead = [];
+      for(let i = 0; i < localStorage.length; i++){ const k = localStorage.key(i);
+        if(k && (k === base || k.indexOf(base + '.') === 0 || k === prof || k.indexOf(prof + '.') === 0)) dead.push(k); }
+      dead.forEach(k => localStorage.removeItem(k));
+    }catch(e){ return false; }
+    reg.list = reg.list.filter(x => x.id !== id); if(reg.active === id) reg.active = null;
+    return write(reg); };
+
+  /* ---- address and phone ---- */
+  const isBD = () => $('rCountry').value === 'Bangladesh';
+  const fillDist = () => fill($('rDist'), [['', T.pick]].concat((BD_DIV[$('rDiv').value] || []).map(x => [x, x])).concat([['__o', T.other]]));
+  const paintAddr = () => { const bd = isBD(), dv = $('rDiv').value, ds = $('rDist').value;
+    $('lDiv').textContent = bd ? T.lDiv : T.lDivO; $('lDist').textContent = bd ? T.lDist : T.lDistO;
+    $('rDiv').hidden = !bd; $('rDivTxt').hidden = !(!bd || dv === '__o');
+    $('rDist').hidden = !bd || dv === '__o'; $('rDistTxt').hidden = !(!bd || dv === '__o' || ds === '__o'); };
+  const addrParts = () => { const bd = isBD(), dv = $('rDiv').value, ds = $('rDist').value;
+    return { division: bd ? (dv === '__o' ? val('rDivTxt') : dv) : val('rDivTxt'),
+             district: bd ? ((dv === '__o' || ds === '__o') ? val('rDistTxt') : ds) : val('rDistTxt') }; };
+  const paintPhone = () => { const c = CC[+$('rCc').value] || CC[0]; $('rPfx').textContent = c[1]; $('rPhone').maxLength = c[3]; };
+  const dobOk = () => { const d = +val('rDay'), m = +$('rMon').value, y = +val('rYear');
+    if(!d || !m || !y) return false; const t = new Date(y, m-1, d);
+    return t.getDate() === d && t.getMonth() === m-1 && y >= 1900 && t <= now; };
+
+  /* ---- register: checks per step ---- */
+  const checks = [
+    () => { const u = val('rUser'), p = $('rPass').value;
+      if(!/^[A-Za-z0-9_]{3,20}$/.test(u)) return err(T.eUser);
+      if(takenUser(u)) return err(T.eTaken);
+      if(!pwOk(p)) return err(T.ePass);
+      if(p !== $('rPass2').value) return err(T.eMatch);
+      return true; },
+    () => { if(!val('rName')) return err(T.eName); if(!dobOk()) return err(T.eDob); return true; },
+    () => { const c = CC[+$('rCc').value] || CC[0], d = $('rPhone').value;
+      if(!/^\d+$/.test(d) || d.length < c[2] || d.length > c[3]) return err(T.ePhone);
+      if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val('rEmail'))) return err(T.eEmail);
+      if(takenEmail(val('rEmail'))) return err(T.eEmailTaken);
+      const a = addrParts();
+      if(!a.division) return err(T.eDiv);
+      if(!a.district) return err(T.eDist);
+      if(!val('rVill')) return err(T.eVill);
+      return true; }
+  ];
+  const create = async () => {
+    const a = addrParts(), c = CC[+$('rCc').value] || CC[0];
+    const dob = val('rYear') + '-' + pad(+$('rMon').value) + '-' + pad(+val('rDay'));
+    const uname = val('rUser'), mail = val('rEmail').toLowerCase().slice(0,60);
+    const profile = { name: val('rName').slice(0,40), user: uname, reg: 1, pic: '', bio: '', cover: '', vis: {gender:true, dob:true, phone:true, email:true, address:true, school:true}, info: {
+      dob, gender: $('rGender').value, phone: (c[1] + $('rPhone').value).slice(0,20), email: mail,
+      country: $('rCountry').value, division: a.division.slice(0,60), district: a.district.slice(0,60), village: val('rVill').slice(0,120),
+      school: val('rSchool').slice(0,80), schoolClass: '',
+      college: '', collegeClass: '', uni: '', field: '', year: '', time: '', subjects: [], goal: '', hobby: '' } };
+    const r = await cloudCreate(uname, mail, $('rPass').value);
+    if(r.err === 'user'){ showStep(0); return err(T.eTaken); }
+    if(r.err === 'email'){ showStep(2); return err(T.eEmailTaken); }
+    if(r.err === 'weak'){ showStep(0); return err(T.ePass); }
+    if(r.err) return err(T.netErr + (r.code ? ' (' + r.code + ')' : ''));
+    const id = 'c_' + r.uid;
+    try{ localStorage.setItem(pkey(id), JSON.stringify(profile)); }catch(e){ return err(T.saveErr); }
+    reg.list.push({id, uid: r.uid}); reg.active = id;
+    try{ sessionStorage.setItem('studyTracker.synced', id); }catch(e){}
+    try{ await withTimeout(cloudUpload(id, r.uid), 10000); }catch(e){ /* kept in the browser; it reaches the cloud when the connection is back */ }
+    enter(); };
+
+  /* Sign-in page copy: overrides the dictionary above. Both languages are set. */
+  delete TX.en.gBtn; delete TX.bn.gBtn;
+  Object.assign(TX.en, {logTitle:'Welcome Back!', logSub:'Sign in to continue your study journey', lgL1:'Username or email', lgH1:'', lgPh:'e.g. rahim_01 or you@gmail.com', noAcc:'No account found with this username or email.', gUseGoogle:'This account was made with Google. Use the Google button above.', gHint:'This email is linked to Google. Use the Google button above.', gBtnTxt:'Google', gTag:'Google account', eEmailTaken:'An account with this email already exists. Log in instead.', eTaken:'This username is already taken. Choose another.', regTitle:'Create Account', regSub:'Start your study journey today', savedSub:'Tap Use to fill in your login.', wHTitle:'Every study minute, in one place.', wHSub:'Track focus time, plan your week, keep notes and watch your progress grow.', wHF1:'Focus timer with breaks', wHF2:'Daily goals and streaks', wHF3:'Tasks, exams and study plans', wHF4:'Notes and insights', eCreds:'Email or password is not correct. If you signed up with Google, use the Google button.', eTooMany:'Too many attempts. Wait a few minutes and try again.', netErr:'Could not reach the server. Check your internet connection and try again.', syncFail:'Could not load your saved data. Check your internet connection and log in again.', sessExpired:'Your session has ended. Log in again to sync this account.', gLinkMsg:'This Gmail already has an account with an email and password. Enter that password below, and Google will be linked.', wSyncTxt:'Syncing your study data…'});
+  Object.assign(TX.bn, {logTitle:'আবার স্বাগতম', logSub:'ইউজারনেম বা ইমেইল ও পাসওয়ার্ড দিয়ে লগইন করুন।', lgL1:'ইউজারনেম বা ইমেইল', lgH1:'', lgPh:'যেমন rahim_01 বা you@gmail.com', noAcc:'এই ইউজারনেম বা ইমেইল দিয়ে কোনো অ্যাকাউন্ট পাওয়া যায়নি।', gUseGoogle:'এই অ্যাকাউন্টটি Google দিয়ে খোলা হয়েছে। উপরের Google বাটনে চাপুন।', gHint:'এই ইমেইল Google দিয়ে যুক্ত। উপরের Google বাটনটি ব্যবহার করুন।', gBtnTxt:'Google দিয়ে চালিয়ে যান', gTag:'Google অ্যাকাউন্ট', eEmailTaken:'এই ইমেইল দিয়ে আগেই একটি অ্যাকাউন্ট আছে। লগইন করুন।', eTaken:'এই ইউজারনেমটি আগে থেকে নেওয়া। অন্য একটি বেছে নিন।', regTitle:'অ্যাকাউন্ট তৈরি করুন', regSub:'তিনটি ছোট ধাপ।', savedSub:'Use চাপলে লগইনের তথ্য বসবে।', wHTitle:'পড়াশোনার প্রতিটি মিনিট, এক জায়গায়।', wHSub:'ফোকাস সময় ট্র্যাক করুন, সপ্তাহের পরিকল্পনা করুন, নোট রাখুন আর অগ্রগতি দেখুন।', wHF1:'বিরতিসহ ফোকাস টাইমার', wHF2:'দৈনিক লক্ষ্য ও ধারাবাহিকতা', wHF3:'কাজ, পরীক্ষা ও পড়ার পরিকল্পনা', wHF4:'নোট ও বিশ্লেষণ', eCreds:'ইমেইল বা পাসওয়ার্ড ঠিক নেই। Google দিয়ে খুলে থাকলে উপরের Google বাটন ব্যবহার করুন।', eTooMany:'অনেকবার চেষ্টা হয়েছে। কয়েক মিনিট পরে আবার চেষ্টা করুন।', netErr:'সার্ভারে যোগাযোগ করা যায়নি। ইন্টারনেট সংযোগ দেখে আবার চেষ্টা করুন।', syncFail:'আপনার সংরক্ষিত তথ্য আনা যায়নি। ইন্টারনেট দেখে আবার লগইন করুন।', sessExpired:'সেশন শেষ হয়েছে। এই অ্যাকাউন্ট সিঙ্ক করতে আবার লগইন করুন।', gLinkMsg:'এই Gmail-এ আগে থেকে email ও password-এর একটি অ্যাকাউন্ট আছে। নিচে সেই password দিন, তাহলে Google যুক্ত হবে।', wSyncTxt:'আপনার পড়ার তথ্য সিঙ্ক হচ্ছে…'});
+
+  /* ---- text, language, steps, tabs ---- */
+  const applyTexts = () => { Object.keys(T).forEach(k => { const el = $(k); if(el && typeof T[k] === 'string') el.textContent = T[k]; });
+    /* the design shows labels as placeholders inside the fields: copy each visible label into its input */
+    document.querySelectorAll('#welcome .wf input[id]').forEach(i => { const l = document.querySelector('label[for="' + i.id + '"]'); if(l && l.textContent) i.placeholder = l.textContent; }); };
+  const fillAll = () => {
+    const mn = LANG === 'bn' ? MON_BN : MON_EN;
+    fill($('rMon'), [['', T.lMon]].concat(mn.map((m,i) => [String(i+1), m])));
+    fill($('rGender'), [['', T.nSpec], ['male', T.gM], ['female', T.gF], ['other', T.gO], ['x', T.gX]]);
+    fill($('rCc'), CC.map((c,i) => [String(i), c[0]]));
+    fill($('rDiv'), [['', T.pick]].concat(Object.keys(BD_DIV).map(d => [d, d])).concat([['__o', T.other]]));
+    fill($('rCountry'), ADDR.map(c => [c, c]).concat([['Other', T.other]]));
+    fillDist(); paintAddr(); paintPhone(); };
+  const showStep = s => { step = s;
+    [0,1,2].forEach(i => { $('st'+i).hidden = i !== s; $('pg'+i).classList.toggle('on', i <= s); });
+    $('wStep').textContent = T.steps[s];
+    $('rBack').hidden = s === 0; $('rNext').textContent = s === 2 ? T.done : T.next; };
+  const paintHeader = () => {
+    $('welTitle').textContent = cur === 'reg' ? T.regTitle : cur === 'saved' ? T.savedTitle : cur === 'reset' ? T.rsTitle : T.logTitle;
+    $('wSub').textContent = cur === 'reg' ? T.regSub : cur === 'saved' ? T.savedSub : cur === 'reset' ? T.rsSub : T.logSub;
+    ['log','reg'].forEach(k => { const t = $(k === 'reg' ? 'tabReg' : 'tabLog'), on = cur === k; t.classList.toggle('on', on); t.setAttribute('aria-selected', String(on)); });
+    const subView = cur === 'saved' || cur === 'reset'; $('wTabs').hidden = subView; $('gWrap').hidden = subView;
+    $('formLog').hidden = cur !== 'log'; $('formReg').hidden = cur !== 'reg'; $('formReset').hidden = cur !== 'reset';
+  $('welcome').classList.toggle('reg-mode', cur === 'reg');   /* the register side of the design uses the violet accent */ $('panelSaved').hidden = cur !== 'saved';
+    $('savedBtn').hidden = cur !== 'log' || !savedList().length;
+    $('savedBtn').textContent = T.savedLbl + ' (' + savedList().length + ')'; };
+  const show = v => { cur = v; $('rErr').textContent = ''; $('lgErr').textContent = ''; $('sErr').textContent = ''; $('rsErr').textContent = ''; $('rsOk').textContent = '';
+    paintHeader(); if(v === 'saved') renderSaved(); if(v === 'reg') showStep(step); };
+  const paintEye = id => { const i = $(id), b = $('eye_' + id); b.textContent = i.type === 'password' ? T.show : T.hide; b.setAttribute('aria-pressed', String(i.type === 'text')); };
+  /* The account list: Use fills the username, Delete needs two taps */
+  const renderSaved = () => {
+    const box = $('wList'); box.innerHTML = '';
+    savedList().forEach(a => {
+      const pr = profOf(a.id), row = document.createElement('div'); row.className = 'wacc';
+      const info = document.createElement('div'); info.className = 'wacc-t';
+      const nm = document.createElement('b'); nm.textContent = nameOf(a.id);
+      const un = document.createElement('small'); un.textContent = isG(a.id) ? T.gTag : (pr.user ? '@' + pr.user : '');
+      info.appendChild(nm); info.appendChild(un);
+      const acts = document.createElement('div'); acts.className = 'wacts';
+      const use = document.createElement('button'); use.type = 'button'; use.className = 'wbtn sm'; use.textContent = T.useAcc;
+      use.onclick = () => { if(isG(a.id)){ show('log'); $('gBtn').click(); return; } $('lgUser').value = pr.user || ''; $('lgPass').value = ''; show('log'); updateHint(); $('lgPass').focus(); };
+      const del = document.createElement('button'); del.type = 'button'; del.className = 'wbtn sm wdel'; del.textContent = T.delAcc;
+      del.onclick = () => {
+        if(!del.dataset.arm){ del.dataset.arm = '1'; del.textContent = T.delSure;
+          setTimeout(() => { if(del.isConnected){ delete del.dataset.arm; del.textContent = T.delAcc; } }, 4000); return; }
+        if(!forget(a.id)){ $('sErr').textContent = T.delErr; return; }
+        $('sErr').textContent = ''; renderSaved(); if(!savedList().length) show('log'); };
+      acts.appendChild(use); acts.appendChild(del); row.appendChild(info); row.appendChild(acts); box.appendChild(row); });
+    $('savedBtn').textContent = T.savedLbl + ' (' + savedList().length + ')'; };
+  /* A legacy account (made before passwords) shows a short note until its password is set */
+  const updateHint = () => { const a = findAcc($('lgUser').value.trim()), g = !!a && isG(a.id);
+    $('gBtn').classList.toggle('hl', g);
+    $('lgH1').textContent = g ? T.gHint : T.lgH1;
+    $('lgH2').textContent = !g && a && !uidOf(a) && !a.pw ? T.lgLegacy : ''; };
+  /* A Google account has no password, so point the person to the Google button */
+  const gFocus = () => { const b = $('gBtn'); b.classList.add('hl'); b.focus(); };
+  const applyLang = l => { LANG = l; Object.assign(T, TX[l]); document.documentElement.lang = l;
+    ['en','bn'].forEach(k => { const b = $(k === 'en' ? 'langEn' : 'langBn'), on = k === l; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); });
+    applyTexts(); $('lgUser').placeholder = T.lgPh; fillAll(); showStep(step); ['rPass','rPass2','lgPass'].forEach(paintEye); paintHeader(); updateHint();
+    if(cur === 'saved') renderSaved(); };
+
+  /* ---- events ---- */
+  const pwmW = () => { const p = $('rPass').value; const s = !p ? 0 : (p.length < 6 || !/[A-Za-z]/.test(p) || !/\d/.test(p)) ? 1 : (p.length >= 10 && /[A-Z]/.test(p) && /[^A-Za-z0-9]/.test(p)) ? 3 : 2;
+    $('pwm').dataset.s = String(s); $('pwmTxt').textContent = s ? ['', T.pwWk, T.pwFr, T.pwSt][s] : ''; };
+  $('rPass').addEventListener('input', pwmW);
+  $('formReg').onsubmit = async e => { e.preventDefault(); $('rErr').textContent = '';
+    if(!checks[step]()) return; if(step < 2) return showStep(step + 1);
+    if(!$('rTerms').checked) return ($('rErr').textContent = T.eTerms);
+    if(!hasCrypto()) return err(T.noCrypto);
+    $('rNext').disabled = true;
+    try{ await create(); }finally{ $('rNext').disabled = false; } };
+  $('formLog').onsubmit = async e => { e.preventDefault(); lgErr('');
+    const u = val('lgUser'), p = $('lgPass').value;
+    if(!u) return lgErr(T.eUserReq);
+    if(!p) return lgErr(T.ePassReq);
+    const a = findAcc(u);
+    if(a && !uidOf(a)) return legacyLogin(a, p);
+    $('lgBtn').disabled = true;
+    try{
+      const email = await resolveEmail(u, a);
+      if(!email) return lgErr(T.noAcc);
+      let cred;
+      await setPersist($('rememberMe').checked); try{ cred = await fbAuth.signInWithEmailAndPassword(email, p); }
+      catch(x){ /* an account made with Google only has no password: point to the Google button */
+        if(a && isG(a.id) && ['auth/invalid-credential','auth/wrong-password','auth/user-not-found'].indexOf(x.code) > -1){ gFocus(); return lgErr(T.gUseGoogle); }
+        throw x; }
+      const msg = await finishCloud(cred.user);
+      if(msg) lgErr(msg);
+    }catch(x){ lgErr(cloudErr(x)); }
+    finally{ $('lgBtn').disabled = false; } };
+  $('lgUser').addEventListener('input', updateHint);
+  $('rBack').onclick = () => { $('rErr').textContent = ''; showStep(step - 1); };
+  $('rCountry').onchange = paintAddr;
+  $('rDiv').onchange = () => { fillDist(); paintAddr(); };
+  $('rDist').onchange = paintAddr;
+  $('rCc').onchange = paintPhone;
+  ['rDay','rYear','rPhone'].forEach(id => { $(id).oninput = () => { $(id).value = $(id).value.replace(/\D/g,''); }; });
+  ['rPass','rPass2','lgPass'].forEach(id => { $('eye_' + id).onclick = () => { const i = $(id); i.type = i.type === 'password' ? 'text' : 'password'; paintEye(id); }; });
+  /* Remember me: on keeps the sign-in after the browser closes; off keeps it for this tab only */
+  const setPersist = async remember => { try{ await fbAuth.setPersistence(remember ? firebase.auth.Auth.Persistence.LOCAL : firebase.auth.Auth.Persistence.SESSION); }catch(e){} };
+  $('tabLog').onclick = () => show('log'); $('tabReg').onclick = () => show('reg'); $('goReg').onclick = () => show('reg'); $('goLog2').onclick = () => show('log');
+  /* Terms & Conditions: opens from the register page, in the language the user chose */
+  $('termsLink').onclick = () => { document.querySelectorAll('#termsBox .tbody').forEach(b => { b.hidden = b.dataset.lang !== LANG; }); $('termsBox').hidden = false; $('termsClose').focus(); };
+  $('termsClose').onclick = () => { $('termsBox').hidden = true; $('termsLink').focus(); };
+  $('termsBox').addEventListener('click', e => { if(e.target.id === 'termsBox') $('termsBox').hidden = true; });
+  /* Facebook and Apple: switched on (SOCIAL_ON) only after the provider is enabled in the Firebase console. */
+  const SOCIAL_ON = { facebook: false, apple: false };
+  const socialSignIn = async kind => {
+    if(!SOCIAL_ON[kind]) return;
+    const btn = $(kind === 'facebook' ? 'fbBtn' : 'apBtn'); $('gErr').textContent = ''; btn.disabled = true;
+    try{
+      const provider = kind === 'facebook' ? new firebase.auth.FacebookAuthProvider() : new firebase.auth.OAuthProvider('apple.com');
+      if(kind === 'apple'){ provider.addScope('email'); provider.addScope('name'); }
+      await setPersist($('rememberMe').checked);
+      const u = (await fbAuth.signInWithPopup(provider)).user;
+      if(!reg.list.some(a => uidOf(a) === u.uid)){
+        /* a new Facebook or Apple user gets a profile, as a Google user does; Apple sends the name only on the first sign-in */
+        const id = 'c_' + u.uid, fallback = kind === 'facebook' ? 'Facebook user' : 'Apple user';
+        const profile = { name: String(u.displayName || u.email || fallback).slice(0,40), user: '', reg: 1, pic: '', bio: '', cover: '',
+          vis: {gender:true, dob:true, phone:true, email:true, address:true, school:true},
+          info: { dob:'', gender:'', phone:'', email: String(u.email || '').slice(0,60), country:'', division:'', district:'', village:'', school:'', schoolClass:'', college:'', collegeClass:'', uni:'', field:'', year:'', time:'', subjects:[], goal:'', hobby:'' } };
+        try{ localStorage.setItem(pkey(id), JSON.stringify(profile)); }catch(e){ $('gErr').textContent = T.saveErr; return; }
+        reg.list.push({id, uid: u.uid});
+      }
+      const msg = await finishCloud(u); if(msg) $('gErr').textContent = msg;
+    }catch(x){ $('gErr').textContent = (x && x.code === 'auth/account-exists-with-different-credential') ? T.socialExists : cloudErr(x); }
+    finally{ btn.disabled = !SOCIAL_ON[kind]; } };
+  $('fbBtn').onclick = () => socialSignIn('facebook'); $('apBtn').onclick = () => socialSignIn('apple');
+  ['facebook','apple'].forEach(k => { const b = $(k === 'facebook' ? 'fbBtn' : 'apBtn'); b.disabled = !SOCIAL_ON[k]; b.classList.toggle('wdis', !SOCIAL_ON[k]); });
+  /* ---- forgot password: Firebase emails a reset link. The reply is the same whether or not the account exists, so emails cannot be checked this way. ---- */
+  $('fpBtn').onclick = () => { $('rsUser').value = val('lgUser'); show('reset'); $('rsUser').focus(); };
+  $('rsBack').onclick = () => show('log');
+  $('formReset').onsubmit = async e => { e.preventDefault();
+    $('rsErr').textContent = ''; $('rsOk').textContent = '';
+    const u = val('rsUser');
+    if(!u) { $('rsErr').textContent = T.eUserReq; return; }
+    $('rsBtn').disabled = true; let sent = false;
+    try{
+      const email = await resolveEmail(u, findAcc(u));
+      if(email){ try{ await fbAuth.sendPasswordResetEmail(email); }catch(x){ if(!x || x.code !== 'auth/user-not-found') throw x; } }
+      sent = true; $('rsOk').textContent = T.rsSent;
+    }catch(x){
+      const c = (x && x.code) || '';
+      $('rsErr').textContent = c === 'auth/invalid-email' ? T.eEmail : c === 'auth/too-many-requests' ? T.eTooMany : cloudErr(x);
+    }finally{
+      if(sent) setTimeout(() => { $('rsBtn').disabled = false; }, 30000); else $('rsBtn').disabled = false;
+    } };
+
+  $('savedBtn').onclick = () => show('saved'); $('savedBack').onclick = () => show('log');
+  $('langEn').onclick = () => { try{ localStorage.setItem('studyTracker.lang', 'en'); }catch(e){} applyLang('en'); };
+  $('langBn').onclick = () => { try{ localStorage.setItem('studyTracker.lang', 'bn'); }catch(e){} applyLang('bn'); };
+
+  /* The welcome page follows the device light or dark mode; the app's own theme takes over after log in */
+  const mqDark = window.matchMedia ? matchMedia('(prefers-color-scheme: dark)') : null;
+  const paintSystemTheme = () => { document.documentElement.dataset.theme = mqDark && mqDark.matches ? 'dark' : 'light'; document.documentElement.dataset.themePref = 'system'; };
+  paintSystemTheme();
+  if(mqDark){ mqDark.addEventListener ? mqDark.addEventListener('change', paintSystemTheme) : mqDark.addListener(paintSystemTheme); }
+
+/* ---- Google sign-in (Firebase). Each Google account gets its own profile and data on this device. ---- */
+  $('gBtn').onclick = async () => {
+    $('gErr').textContent = ''; $('gBtn').disabled = true;
+    try{
+      const provider = new firebase.auth.GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'select_account' });
+      let u;
+      await setPersist($('rememberMe').checked); try{ u = (await fbAuth.signInWithPopup(provider)).user; }
+      catch(x){
+        if(x && x.code === 'auth/account-exists-with-different-credential'){
+          /* the SDK may keep the credential and email on the error itself or inside customData */
+          const cr = x.credential || (x.customData && x.customData.credential) || null;
+          const em = String(x.email || (x.customData && x.customData.email) || '');
+          if(cr) pendingLink = {cred: cr, email: em.toLowerCase()};
+          show('log'); $('lgUser').value = em; updateHint();
+          $('gErr').textContent = T.gLinkMsg; $('lgPass').focus();
+          return; }
+        throw x; }
+      const mail = String(u.email || '').trim().toLowerCase();
+      if(!reg.list.some(a => uidOf(a) === u.uid)){
+        /* An older account on this device with the same Gmail (made before cloud sync) opens as before */
+        const old = mail ? reg.list.find(a => nameOf(a.id) && !uidOf(a) && emailOf(a.id) === mail) : null;
+        if(old){ reg.active = old.id; enter(); return; }
+        const id = 'g_' + u.uid;
+        const profile = { name: String(u.displayName || u.email || 'Google user').slice(0,40), user: '', reg: 1, pic: '', bio: '', cover: '',
+          vis: {gender:true, dob:true, phone:true, email:true, address:true, school:true},
+          info: { dob:'', gender:'', phone:'', email: String(u.email || '').slice(0,60), country:'', division:'', district:'', village:'',
+            school:'', schoolClass:'', college:'', collegeClass:'', uni:'', field:'', year:'', time:'', subjects:[], goal:'', hobby:'' } };
+        try{ localStorage.setItem(pkey(id), JSON.stringify(profile)); }catch(e){ $('gErr').textContent = T.saveErr; return; }
+        reg.list.push({id, uid: u.uid});
+      }
+      const msg = await finishCloud(u);
+      if(msg) $('gErr').textContent = msg;
+    }catch(x){
+      if(x && (x.code === 'auth/popup-closed-by-user' || x.code === 'auth/cancelled-popup-request')) return;
+      $('gErr').textContent = cloudErr(x);
+    }finally{ $('gBtn').disabled = false; }
+  };
+
+  /* ---- start ---- */
+  document.body.classList.add('welcome'); $('welcome').hidden = false;
+  applyLang(LANG);
+  $('rCountry').value = 'Bangladesh'; $('rCc').value = '0'; fillDist(); paintAddr(); paintPhone();
+  show(reg.list.some(a => nameOf(a.id)) ? 'log' : 'reg');
+  if(needPull){
+    bootOn(T.bootAuth);
+    (async () => {
+      const user = await new Promise(res => { const off = fbAuth.onAuthStateChanged(u => { off(); res(u); }); });
+      if(!user || user.uid !== activeUid){ bootOff(); show('log'); return lgErr(T.sessExpired); }
+      const msg = await bootAccount(activeEntry, activeUid, null);
+      if(msg){ show('log'); lgErr(msg); }
+    })();
+  }
+})();
+if(!window.__STOP){
+/* ================= Storage ================= */
+const ICO = {cam:'<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>',edit:'<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg>',trash:'<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>',clock:'<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg>',target:'<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5"/></svg>',flame:'<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c1 4 5 5.5 5 10a5 5 0 01-10 0c0-2 1-3 2-4 .3 1.4 1 2 2 2-1-3-.5-5 1-8z"/></svg>',bolt:'<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3L5 14h6l-1 7 8-11h-6z"/></svg>',gem:'<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4h12l3 5-9 11L3 9z"/><path d="M3 9h18M9 4l3 16M15 4l-3 16"/></svg>',crown:'<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18h16M5 18L3 7l5 4 4-6 4 6 5-4-2 11"/></svg>'};
+const ACC = window.__ACC;
+const KEY = ACC.id==='main' ? 'studyTracker.v2' : 'studyTracker.v2@'+ACC.id;
+const NKEY = ACC.pkey(ACC.id);
+let prof = {name:'', pic:'', cover:''};
+try{ const p = JSON.parse(localStorage.getItem(NKEY)||'null') || {}; prof.name = String(p.name||'').trim().slice(0,40); prof.pic = (typeof p.pic==='string' && p.pic.startsWith('data:image/')) ? p.pic : ''; prof.cover = (typeof p.cover==='string' && p.cover.startsWith('data:image/')) ? p.cover : ''; }catch(e){}
+let profName = prof.name;
+
+/* ================= Localization (English / Bengali) =================
+   Every visible string comes from I18N. Key missing in one language falls back to English. */
+const I18N = {"en": {"app.title": "Study Time Tracker", "a.skip": "Skip to content", "a.settings": "Settings", "a.theme": "Switch dark / light mode", "nav.main": "Main", "nav.home": "Home", "nav.more": "More", "nav.tasks": "Tasks", "nav.notes": "Notes", "nav.subjects": "Subjects", "nav.gStudy": "Study", "subj.title": "Subjects", "subj.desc": "Organize what you study and link tasks, notes and study time.", "subj.add": "Add subject", "subj.search": "Search subjects", "subj.none": "No subjects yet", "subj.noneD": "Add your first subject, or import the names already in your study history.", "subj.import": "{n} subject names found in your study history.", "subj.importBtn": "Import them", "subj.imported": "{n} subjects imported", "subj.name": "Name", "subj.descF": "Description (optional)", "subj.color": "Color", "subj.icon": "Icon", "subj.target": "Weekly target in hours (optional)", "subj.edit": "Edit subject", "subj.new": "New subject", "subj.dup": "A subject with this name already exists.", "subj.nameReq": "Enter a subject name (up to 30 characters).", "subj.tgtBad": "Target must be between 0 and 168 hours.", "subj.delConfirm": "Delete subject “{n}”? Study sessions keep their subject name. Tasks and notes become unassigned.", "subj.studied": "Studied: {d}", "subj.week": "This week: {a} of {b}", "subj.open": "{t} open tasks · {n} notes", "subj.noMatch": "No subjects match your search.", "subj.limit": "You can have up to 100 subjects.", "c.save": "Save", "c.cancel": "Cancel", "c.edit": "Edit", "c.delete": "Delete", "c.saved": "Saved", "c.deleted": "Deleted", "c.allSubj": "All subjects", "c.noSubj": "No subject", "c.storage": "Could not save (storage full or blocked).", "task.title": "Tasks", "task.desc": "Plan and track your academic work.", "task.add": "Add task", "task.edit": "Edit task", "task.new": "New task", "task.search": "Search tasks", "f.all": "All", "f.today": "Today", "f.upcoming": "Upcoming", "f.overdue": "Overdue", "f.done": "Completed", "pri.low": "Low", "pri.med": "Medium", "pri.high": "High", "st.todo": "To Do", "st.prog": "In Progress", "st.done": "Completed", "task.ttl": "Title", "task.descF": "Description (optional)", "task.due": "Due date", "task.time": "Due time (optional)", "task.pri": "Priority", "task.st": "Status", "task.est": "Estimate in minutes (optional)", "task.titleReq": "Enter a task title.", "task.estBad": "Estimate must be 1–1440 minutes.", "task.delConfirm": "Delete task “{n}”?", "task.none": "No tasks yet", "task.noneD": "Add a task to start planning your work.", "task.noMatch": "No tasks match these filters.", "sort.due": "Sort: deadline", "sort.pri": "Sort: priority", "sort.new": "Sort: newest", "task.dToday": "Due today", "task.dTom": "Due tomorrow", "task.noDue": "No due date", "task.min": "{n} min", "task.reopen": "Reopen task", "task.complete": "Mark complete", "allPri": "All priorities", "allSt": "All statuses", "home.tasks": "Today's tasks", "home.tNone": "No tasks planned for today.", "home.tAll": "All tasks", "home.tOver": "Overdue", "note.title": "Notes", "note.desc": "Your own writing: study notes and reminders.", "note.add": "New note", "note.search": "Search notes", "note.all": "All", "note.pinned": "Pinned", "note.recent": "Recent", "note.none": "No notes yet", "note.noneD": "Create your first note.", "note.noMatch": "No notes match.", "note.ttl": "Title", "note.body": "Write your note…", "note.tags": "Tags, comma separated", "note.back": "Back", "note.saving": "Saving…", "note.savedS": "Saved", "note.fail": "Unable to save", "note.delConfirm": "Delete this note? This cannot be undone.", "note.pin": "Pin", "note.unpin": "Unpin", "note.untitled": "Untitled", "note.sortU": "Sort: recently updated", "note.sortA": "Sort: A–Z", "allTags": "All tags", "note.updated": "Updated {d}", "note.saveNow": "Save now", "note.emptyNote": "Empty notes are not saved.", "plan.imp": "Subjects, tasks and notes from the file were merged ({n} records).", "plan.skip": "{n} invalid records in the file were skipped.", "nav.ai": "AI Assistant", "nav.settings": "Settings", "nav.gMain": "Main", "nav.gInsights": "Insights", "nav.gExplore": "Explore", "nav.gPref": "Preferences", "nav.collapse": "Collapse sidebar", "a.menu": "More actions", "a.profile": "Profile", "menu.theme": "Switch light / dark", "menu.settings": "Settings & appearance", "qa.title": "Quick actions", "qa.start": "Start focus", "qa.startD": "Begin a timed session", "qa.log": "Log study time", "qa.logD": "Add time manually", "qa.insights": "View insights", "qa.insD": "Trends and heatmap", "qa.ai": "Ask AI assistant", "qa.aiD": "Questions about your study", "cont.title": "Continue studying", "cont.paused": "Paused", "cont.running": "In progress", "cont.resume": "Continue", "empty.title": "Your study journey starts here.", "empty.body": "Start a focus session or log your first study time. Your progress will appear here and in Insights.", "nav.focus": "Focus", "nav.insights": "Insights", "nav.history": "History", "home.today": "Today", "home.focusTitle": "Today's Focus", "home.dailyTarget": "Daily target", "home.remaining": "Remaining", "home.goalReached": "Goal reached ✓", "home.startFocus": "Start Focus", "home.progressLabel": "Daily goal progress", "home.streak": "{n} day streak", "home.morning": "Good morning", "home.afternoon": "Good afternoon", "home.evening": "Good evening", "day.one": "1 day", "day.many": "{n} days", "qs.streak": "Current streak", "qs.goal": "Goal progress", "qs.total": "Total study", "qs.days": "Study days", "qs.longest": "Longest: {n}", "qs.ofGoal": "of today's goal", "qs.goalDays": "{n} reached goal", "qs.minRem": "+{m} min", "week.title": "Weekly summary (last 7 days)", "week.total": "Total", "week.thisWeek": "This week: {a} of {b}", "week.note": "Weekly target = 7 × daily target (Settings).", "week.progLbl": "Weekly target progress", "timer.title": "Focus timer", "timer.mode": "Timer mode", "timer.custom": "Custom", "timer.focusLbl": "Focus (1–180 min)", "timer.breakLbl": "Break (1–60 min)", "timer.focus": "Focus", "timer.break": "Break", "timer.start": "Start", "timer.pause": "Pause", "timer.resume": "Resume", "timer.startBreak": "Start break", "timer.reset": "Reset", "timer.skip": "Skip break", "timer.clockLbl": "Time remaining", "timer.progLbl": "Session progress", "timer.subject": "Subject for the next focus session", "timer.sound": "Sound when a session ends", "timer.notify": "Browser notification", "timer.errCustom": "Focus must be 1–180 min and break 1–60 min (whole numbers).", "timer.paused": "Paused — remaining time is kept.", "timer.restored": "Session restored (paused).", "timer.doneMsg": "Focus complete — {n} min saved. Break time is not counted.", "timer.saved": "This session was already saved.", "timer.dayLimit": "Daily 24-hour limit reached — session not saved", "timer.breakReady": "Your break is ready.", "timer.breakOver": "Break over — ready for the next focus session.", "timer.breakOverShort": "Break over", "timer.skipped": "Break skipped — ready to focus.", "timer.resetConfirm": "Reset the timer? Progress in this session will be discarded.", "timer.switchConfirm": "Switch mode? Progress in this session will be discarded.", "timer.focusNotif": "Focus session complete — time for a break.", "timer.breakNotif": "Break over — back to focus.", "pref.noNotif": "Browser notifications are not available here. Sound and the on-screen message still work.", "pref.denied": "Permission was not granted. Allow notifications in your browser settings to use this.", "btn.reset": "Reset", "btn.switch": "Switch", "form.title": "Add study time", "form.editing": "Edit time", "form.date": "Date", "form.hours": "Hours", "form.minutes": "Minutes (00–59)", "form.optional": "Subject and note (optional)", "form.subject": "Subject", "form.newSubject": "New subject", "form.note": "Note", "form.save": "Save", "form.update": "Update", "form.cancel": "Cancel", "v.date": "Choose a date.", "v.future": "You cannot add time to a future date.", "v.emptyTime": "Enter hours and minutes.", "v.hours": "Hours must be a whole number from 0 to 24.", "v.minutes": "Minutes must be from 00 to 59.", "v.dateBad": "Invalid date.", "v.min1": "Enter at least 1 minute.", "v.day24": "A day cannot exceed 24 hours.", "v.locked": "Data upgrade failed — your original data is safe and changes are disabled.", "v.storage": "Could not save data (storage full or blocked).", "v.noImg": "No data to save as an image.", "save.new": "Saved", "save.upd": "Updated", "trend.title": "Study trend", "trend.range": "Chart range", "trend.prev": "Previous period", "trend.next": "Next period", "trend.chartLbl": "Study trend chart. Use the left and right arrow keys to inspect each bar.", "trend.avgNote": "Average = total ÷ days since your first record. Days without a record count as 0 h; a target applies only to those days.", "trend.bySubject": "By subject (this period)", "trend.table": "View as data table", "trend.empty": "No study was recorded in this period. Use ‹ › to look at other periods.", "trend.emptyNone": "No study data yet. Add your first session on Home, or finish a focus session, and your trend will appear here.", "legend.hit": "Target reached", "legend.below": "Below target", "legend.target": "Target per {u}", "legend.zero": "Recorded 0", "legend.blank": "Blank = no record", "legend.start": "Bars start at 0 h", "unit.day": "day", "unit.week": "week", "unit.month": "month", "unit.hours": "hours", "txt.sum": "{label}: studied {total} on {act} of {trk} tracked days (average {avg} per tracked day)", "txt.best": "; best day {day}, {dur}", "txt.reach": "; daily target reached on {n} days", "det.before": "Before your first record", "det.none": "No record for this day", "det.zero": "Recorded 0 — no study", "det.pct": "{p}% of daily target", "det.reached": " ✓ reached", "det.activeOf": "{a} active of {b} tracked days", "det.targetOf": "{p}% of {d} target", "det.perActive": "{d} per active day", "sess.one": "1 session", "sess.many": "{n} sessions", "heat.title": "Study activity", "heat.label": "Study activity calendar, last 18 weeks. Use the arrow keys to move between days.", "heat.sum": "Last 18 weeks: {a} active days, {b} days reached the daily target.", "heat.pick": "Pick a day", "heat.outside": "That date is outside the last 18 weeks.", "heat.noData": "No study data yet. Add a session and this calendar will start to fill in.", "heat.legNo": "No record", "heat.legToday": "Today", "heat.legZero": "Recorded 0", "heat.legTarget": "≥100% of daily target", "sum.total": "Total study", "sum.avgTracked": "Average / tracked day", "sum.avgActive": "Average / active day", "sum.active": "Active days", "sum.best": "Best day", "sum.targetDays": "Target days", "sum.streak": "Streak (all time)", "sum.vsTarget": "Total vs target", "streak.now": "{c} now · {l} best", "tbl.studied": "Studied", "tbl.target": "Target", "tbl.noRec": "no record", "mon.heading": "Monthly summary", "mon.total": "This month total", "mon.avg": "Average (study days)", "mon.best": "Best day", "mon.active": "Active days", "mon.reach": "Target reached", "mon.prev": "Previous month comparison", "mon.dayCount": "{a} of {b} tracked days", "mon.reachCount": "{a} of {b} days ({p}%)", "mon.noPrev": "{cur} (no previous month data)", "adv.title": "Advanced statistics", "adv.more": "Show more", "adv.totalStudy": "Total study", "adv.avgStudy": "Average study", "adv.days": "Study days", "adv.cur": "Current streak", "adv.longest": "Longest streak", "adv.bestDay": "Best study day", "adv.targetRate": "Target reached (of active days)", "adv.dayWord": "days", "ach.title": "Achievements", "ach.unlocked": "Unlocked: {name}", "ach.first": "First hour", "ach.d.first": "Study 1 hour in total", "ach.goal": "Goal reached", "ach.d.goal": "Hit your daily target", "ach.streak7": "7-day streak", "ach.d.streak7": "Study 7 days in a row", "ach.h50": "50 hours", "ach.d.h50": "50 total study hours", "ach.h100": "100 hours", "ach.d.h100": "100 total study hours", "ach.streak30": "30-day streak", "ach.d.streak30": "Study 30 days in a row", "sub.title": "Subject breakdown · all time", "sub.none": "No subject", "sub.empty": "Save study time with a subject and the breakdown appears here.", "sub.noneP": "No study in this period.", "sub.all": "All subjects", "sub.optNone": "— No subject —", "hist.title": "History", "hist.img": "Save as image", "hist.imgAria": "Save as image", "hist.search": "Search subject or note", "hist.searchLbl": "Search", "hist.monthLbl": "Month", "hist.allMonths": "All months", "hist.subjLbl": "Subject", "hist.sortLbl": "Sort order", "hist.newest": "Newest first", "hist.oldest": "Oldest first", "hist.empty": "No sessions yet. Enter time on Home and tap Save.", "hist.noMatch": "No sessions match this search or filter.", "hist.days": "{n} days", "hist.sess": "{n} sessions", "hist.timer": "Timer", "hist.manual": "Manual", "hist.dayTotal": "Day total {d}", "hist.todayBadge": "Today", "hist.goal": "✓ Goal", "hist.edit": "Edit session", "hist.del": "Delete session", "set.title": "Settings", "set.target": "Daily target (hours)", "nav.profile": "Profile", "prof.create": "Create your profile", "prof.hint": "Enter your name to get started.", "prof.name": "Name", "prof.continue": "Continue", "prof.title": "Profile", "prof.edit": "Edit name", "prof.save": "Save", "prof.cancel": "Cancel", "prof.empty": "Enter a name.", "prof.saved": "Name saved", "set.appearance": "Appearance", "set.theme": "Theme", "set.light": "Light", "set.dark": "Dark", "set.study": "Study", "set.data": "Data", "set.back": "Back", "set.sub": "Preferences and your data", "set.prefs": "Preferences", "set.data": "Data Management", "set.font": "Font", "set.lang": "Language", "set.langBn": "বাংলা", "set.langEn": "English", "set.targetErr": "Target must be between 1 and 24 hours.", "set.export": "Export data", "set.import": "Import data", "set.reset": "Reset all data", "set.restore": "Restore last backup", "set.recInfo": "Last backup: {when} ({reason})", "set.recNone": "No backup has been saved in this browser yet.", "reason.import": "before import", "reason.reset": "before reset", "reason.restore": "before restore", "exp.done": "Export file created with {n} sessions.", "exp.raw": "The stored data is damaged, so the original text was exported unchanged.", "exp.fail": "Export failed: {reason}", "imp.done": "Import complete: {n} sessions restored. Your previous data was kept as a backup (Settings → Restore).", "imp.fail": "Import failed: {reason}. Your current data is unchanged.", "imp.confirm": "Importing replaces your current data. A backup of the current data is kept first. Continue?", "imp.btn": "Import", "reset.confirm": "Delete all study data? A backup of the current data is kept first, so you can restore it from Settings.", "reset.btn": "Delete all", "reset.done": "All data deleted. A backup of the previous data is kept.", "restore.confirm": "Restore the backup from {when}? Your current data is backed up first.", "restore.btn": "Restore", "restore.done": "Backup restored.", "restore.fail": "Restore failed: {reason}", "undo.msg": "Session deleted.", "undo.btn": "Undo", "undo.done": "Session restored.", "del.confirm": "Delete the session on {date} ({dur})?", "dlg.delete": "Delete", "dlg.ok": "Confirm", "dlg.cancel": "Cancel", "img.title": "Study History", "img.total": "Total study", "img.days": "Study days", "img.streak": "Current streak", "img.footer": "Study Time Tracker", "e.json": "the file is not valid JSON", "e.notBackup": "this is not a Study Time Tracker backup", "e.version": "saved by a newer or unknown version", "e.tooMany": "too many sessions", "e.sessInvalid": "session {n} is invalid", "e.sessSrc": "session {n}: unknown source", "e.sessDate": "session {n}: invalid date", "e.sessMin": "session {n}: invalid duration", "e.sessId": "session {n}: invalid or duplicate id", "e.sessTime": "session {n}: invalid timestamps", "e.entry": "invalid daily total on {d}", "e.over24": "more than 24 hours on {d}", "e.settings": "invalid settings", "e.target": "invalid daily target", "e.theme": "invalid theme", "e.lang": "invalid language", "e.subjects": "invalid subject list", "e.big": "the file is larger than 10 MB", "e.unknown": "unknown error", "e.backupWrite": "could not write the migration backup", "banner.lock": "Data upgrade failed ({reason}). Your original data is untouched and changes are disabled. Backup key: {key}", "foot.by": "Designed & Developed by", "foot.copy": "© {y} Study Time Tracker"}, "bn": {"app.title": "Study Time Tracker", "a.skip": "মূল বিষয়বস্তুতে যান", "a.settings": "সেটিংস", "a.theme": "ডার্ক / লাইট মোড বদলান", "nav.main": "প্রধান মেনু", "nav.home": "হোম", "nav.more": "আরও", "nav.tasks": "কাজ", "nav.notes": "নোট", "nav.subjects": "বিষয়", "nav.gStudy": "পড়াশোনা", "subj.title": "বিষয়", "subj.desc": "কী পড়ছেন গুছিয়ে রাখুন; কাজ, নোট ও পড়ার সময় যুক্ত করুন।", "subj.add": "বিষয় যোগ", "subj.search": "বিষয় খুঁজুন", "subj.none": "এখনো কোনো বিষয় নেই", "subj.noneD": "প্রথম বিষয় যোগ করুন, বা পড়াশোনার ইতিহাসের নামগুলো ইমপোর্ট করুন।", "subj.import": "পড়াশোনার ইতিহাসে {n}টি বিষয়ের নাম পাওয়া গেছে।", "subj.importBtn": "ইমপোর্ট করুন", "subj.imported": "{n}টি বিষয় ইমপোর্ট হয়েছে", "subj.name": "নাম", "subj.descF": "বিবরণ (ঐচ্ছিক)", "subj.color": "রং", "subj.icon": "আইকন", "subj.target": "সাপ্তাহিক লক্ষ্য, ঘণ্টায় (ঐচ্ছিক)", "subj.edit": "বিষয় সম্পাদনা", "subj.new": "নতুন বিষয়", "subj.dup": "এই নামে একটি বিষয় আছে।", "subj.nameReq": "বিষয়ের নাম লিখুন (সর্বোচ্চ ৩০ অক্ষর)।", "subj.tgtBad": "লক্ষ্য ০ থেকে ১৬৮ ঘণ্টার মধ্যে হতে হবে।", "subj.delConfirm": "“{n}” বিষয়টি মুছবেন? পড়ার সেশনে বিষয়ের নাম থেকে যাবে। কাজ ও নোট বিষয়হীন হবে।", "subj.studied": "পড়া হয়েছে: {d}", "subj.week": "এই সপ্তাহ: {b} এর মধ্যে {a}", "subj.open": "{t}টি চলমান কাজ · {n}টি নোট", "subj.noMatch": "কোনো বিষয় মেলেনি।", "subj.limit": "সর্বোচ্চ ১০০টি বিষয় রাখা যায়।", "c.save": "সেভ", "c.cancel": "বাতিল", "c.edit": "সম্পাদনা", "c.delete": "মুছুন", "c.saved": "সেভ হয়েছে", "c.deleted": "মুছে ফেলা হয়েছে", "c.allSubj": "সব বিষয়", "c.noSubj": "বিষয় নেই", "c.storage": "সেভ করা যায়নি (স্টোরেজ ভরা বা বন্ধ)।", "task.title": "কাজ", "task.desc": "পড়াশোনার কাজ পরিকল্পনা ও ট্র্যাক করুন।", "task.add": "কাজ যোগ", "task.edit": "কাজ সম্পাদনা", "task.new": "নতুন কাজ", "task.search": "কাজ খুঁজুন", "f.all": "সব", "f.today": "আজ", "f.upcoming": "আসন্ন", "f.overdue": "মেয়াদোত্তীর্ণ", "f.done": "সম্পন্ন", "pri.low": "কম", "pri.med": "মাঝারি", "pri.high": "বেশি", "st.todo": "করতে হবে", "st.prog": "চলছে", "st.done": "সম্পন্ন", "task.ttl": "শিরোনাম", "task.descF": "বিবরণ (ঐচ্ছিক)", "task.due": "শেষ তারিখ", "task.time": "শেষ সময় (ঐচ্ছিক)", "task.pri": "অগ্রাধিকার", "task.st": "অবস্থা", "task.est": "আনুমানিক সময়, মিনিটে (ঐচ্ছিক)", "task.titleReq": "কাজের শিরোনাম লিখুন।", "task.estBad": "আনুমানিক সময় ১–১৪৪০ মিনিট হতে হবে।", "task.delConfirm": "“{n}” কাজটি মুছবেন?", "task.none": "এখনো কোনো কাজ নেই", "task.noneD": "কাজ যোগ করে পরিকল্পনা শুরু করুন।", "task.noMatch": "এই ফিল্টারে কোনো কাজ মেলেনি।", "sort.due": "সাজান: শেষ তারিখ", "sort.pri": "সাজান: অগ্রাধিকার", "sort.new": "সাজান: নতুন আগে", "task.dToday": "আজ শেষ", "task.dTom": "কাল শেষ", "task.noDue": "শেষ তারিখ নেই", "task.min": "{n} মিনিট", "task.reopen": "আবার চালু করুন", "task.complete": "সম্পন্ন করুন", "allPri": "সব অগ্রাধিকার", "allSt": "সব অবস্থা", "home.tasks": "আজকের কাজ", "home.tNone": "আজকের জন্য কোনো কাজ নেই।", "home.tAll": "সব কাজ", "home.tOver": "মেয়াদোত্তীর্ণ", "note.title": "নোট", "note.desc": "আপনার নিজের লেখা: পড়ার নোট ও মনে রাখার বিষয়।", "note.add": "নতুন নোট", "note.search": "নোট খুঁজুন", "note.all": "সব", "note.pinned": "পিন করা", "note.recent": "সাম্প্রতিক", "note.none": "এখনো কোনো নোট নেই", "note.noneD": "প্রথম নোট তৈরি করুন।", "note.noMatch": "কোনো নোট মেলেনি।", "note.ttl": "শিরোনাম", "note.body": "নোট লিখুন…", "note.tags": "ট্যাগ, কমা দিয়ে", "note.back": "পিছনে", "note.saving": "সেভ হচ্ছে…", "note.savedS": "সেভ হয়েছে", "note.fail": "সেভ করা যায়নি", "note.delConfirm": "নোটটি মুছবেন? এটি ফেরানো যাবে না।", "note.pin": "পিন", "note.unpin": "আনপিন", "note.untitled": "শিরোনামহীন", "note.sortU": "সাজান: সর্বশেষ আপডেট", "note.sortA": "সাজান: বর্ণানুক্রম", "allTags": "সব ট্যাগ", "note.updated": "আপডেট {d}", "note.saveNow": "এখনই সেভ", "note.emptyNote": "খালি নোট সেভ হয় না।", "plan.imp": "ফাইলের বিষয়, কাজ ও নোট মিলিয়ে নেওয়া হয়েছে ({n}টি)।", "plan.skip": "ফাইলের {n}টি ত্রুটিপূর্ণ রেকর্ড বাদ গেছে।", "nav.ai": "এআই সহকারী", "nav.settings": "সেটিংস", "nav.gMain": "প্রধান", "nav.gInsights": "বিশ্লেষণ", "nav.gExplore": "এক্সপ্লোর", "nav.gPref": "পছন্দ", "nav.collapse": "সাইডবার ছোট করুন", "a.menu": "আরও অ্যাকশন", "a.profile": "প্রোফাইল", "menu.theme": "লাইট / ডার্ক বদলান", "menu.settings": "সেটিংস ও চেহারা", "qa.title": "দ্রুত কাজ", "qa.start": "ফোকাস শুরু", "qa.startD": "টাইমার দিয়ে পড়া শুরু করুন", "qa.log": "পড়ার সময় যোগ", "qa.logD": "নিজে সময় লিখুন", "qa.insights": "বিশ্লেষণ দেখুন", "qa.insD": "ধারা ও ক্যালেন্ডার", "qa.ai": "এআই সহকারীকে জিজ্ঞাসা", "qa.aiD": "আপনার পড়া নিয়ে প্রশ্ন", "cont.title": "পড়া চালিয়ে যান", "cont.paused": "থামানো", "cont.running": "চলছে", "cont.resume": "চালিয়ে যান", "empty.title": "আপনার পড়ার যাত্রা এখান থেকে শুরু।", "empty.body": "একটি ফোকাস সেশন শুরু করুন বা প্রথম পড়ার সময় যোগ করুন। অগ্রগতি এখানে ও বিশ্লেষণে দেখা যাবে।", "nav.focus": "ফোকাস", "nav.insights": "বিশ্লেষণ", "nav.history": "ইতিহাস", "home.today": "আজ", "home.focusTitle": "আজকের ফোকাস", "home.dailyTarget": "দৈনিক লক্ষ্য", "home.remaining": "বাকি", "home.goalReached": "লক্ষ্য পূরণ ✓", "home.startFocus": "ফোকাস শুরু করুন", "home.progressLabel": "দৈনিক লক্ষ্যের অগ্রগতি", "home.streak": "{n} দিনের ধারাবাহিকতা", "home.morning": "শুভ সকাল", "home.afternoon": "শুভ দুপুর", "home.evening": "শুভ সন্ধ্যা", "day.one": "১ দিন", "day.many": "{n} দিন", "qs.streak": "বর্তমান ধারাবাহিকতা", "qs.goal": "লক্ষ্যের অগ্রগতি", "qs.total": "মোট পড়াশোনা", "qs.days": "পড়ার দিন", "qs.longest": "সর্বোচ্চ: {n}", "qs.ofGoal": "আজকের লক্ষ্যের", "qs.goalDays": "{n}টি দিন লক্ষ্য পূরণ", "qs.minRem": "+{m} মিনিট", "week.title": "সাপ্তাহিক সারাংশ (শেষ ৭ দিন)", "week.total": "মোট", "week.thisWeek": "এই সপ্তাহ: {b} এর মধ্যে {a}", "week.note": "সাপ্তাহিক লক্ষ্য = ৭ × দৈনিক লক্ষ্য (সেটিংস)।", "week.progLbl": "সাপ্তাহিক লক্ষ্যের অগ্রগতি", "timer.title": "ফোকাস টাইমার", "timer.mode": "টাইমারের মোড", "timer.custom": "কাস্টম", "timer.focusLbl": "ফোকাস (1–180 মিনিট)", "timer.breakLbl": "বিরতি (1–60 মিনিট)", "timer.focus": "ফোকাস", "timer.break": "বিরতি", "timer.start": "শুরু", "timer.pause": "বিরাম", "timer.resume": "চালু রাখুন", "timer.startBreak": "বিরতি শুরু", "timer.reset": "রিসেট", "timer.skip": "বিরতি এড়িয়ে যান", "timer.clockLbl": "বাকি সময়", "timer.progLbl": "সেশনের অগ্রগতি", "timer.subject": "পরের ফোকাস সেশনের বিষয়", "timer.sound": "সেশন শেষ হলে শব্দ", "timer.notify": "ব্রাউজার নোটিফিকেশন", "timer.errCustom": "ফোকাস 1–180 মিনিট এবং বিরতি 1–60 মিনিট হতে হবে (পূর্ণ সংখ্যা)।", "timer.paused": "থামানো হয়েছে — বাকি সময় সংরক্ষিত আছে।", "timer.restored": "সেশন ফিরিয়ে আনা হয়েছে (থামানো অবস্থায়)।", "timer.doneMsg": "ফোকাস শেষ — {n} মিনিট সেভ হয়েছে। বিরতির সময় গণনায় যায় না।", "timer.saved": "এই সেশনটি আগেই সেভ হয়েছে।", "timer.dayLimit": "দৈনিক ২৪ ঘণ্টার সীমা পূর্ণ — সেশন সেভ হয়নি", "timer.breakReady": "আপনার বিরতি শুরু করার জন্য প্রস্তুত।", "timer.breakOver": "বিরতি শেষ — পরের ফোকাসের জন্য প্রস্তুত।", "timer.breakOverShort": "বিরতি শেষ", "timer.skipped": "বিরতি এড়িয়ে যাওয়া হয়েছে — ফোকাসের জন্য প্রস্তুত।", "timer.resetConfirm": "টাইমার রিসেট করবেন? এই সেশনের অগ্রগতি মুছে যাবে।", "timer.switchConfirm": "মোড বদলাবেন? এই সেশনের অগ্রগতি মুছে যাবে।", "timer.focusNotif": "ফোকাস সেশন শেষ — এখন একটু বিরতি নিন।", "timer.breakNotif": "বিরতি শেষ — আবার ফোকাসে ফিরুন।", "pref.noNotif": "এই ব্রাউজারে নোটিফিকেশন পাওয়া যায় না। শব্দ ও স্ক্রিনের বার্তা কাজ করবে।", "pref.denied": "অনুমতি দেওয়া হয়নি। ব্রাউজারের সেটিংসে নোটিফিকেশনের অনুমতি দিন।", "btn.reset": "রিসেট", "btn.switch": "পরিবর্তন", "form.title": "পড়াশোনার সময় যোগ করুন", "form.editing": "সময় পরিবর্তন", "form.date": "তারিখ", "form.hours": "ঘণ্টা", "form.minutes": "মিনিট (00–59)", "form.optional": "বিষয় ও নোট (ঐচ্ছিক)", "form.subject": "বিষয়", "form.newSubject": "নতুন বিষয়", "form.note": "নোট", "form.save": "সেভ", "form.update": "আপডেট", "form.cancel": "বাতিল", "v.date": "একটি তারিখ বেছে নিন।", "v.future": "ভবিষ্যতের তারিখে সময় যোগ করা যাবে না।", "v.emptyTime": "ঘণ্টা ও মিনিট লিখুন।", "v.hours": "ঘণ্টা 0 থেকে 24 এর মধ্যে পূর্ণ সংখ্যা হতে হবে।", "v.minutes": "মিনিট 00 থেকে 59 এর মধ্যে হতে হবে।", "v.dateBad": "তারিখ সঠিক নয়।", "v.min1": "কমপক্ষে 1 মিনিট দিন।", "v.day24": "এক দিনে ২৪ ঘণ্টার বেশি হতে পারে না।", "v.locked": "ডেটা আপগ্রেড ব্যর্থ — আপনার মূল ডেটা নিরাপদ আছে, পরিবর্তন বন্ধ রাখা হয়েছে।", "v.storage": "ডেটা সেভ করা যায়নি (স্টোরেজ ভরা বা বন্ধ)।", "v.noImg": "ছবি হিসেবে সেভ করার মতো ডেটা নেই।", "save.new": "সেভ হয়েছে", "save.upd": "আপডেট হয়েছে", "trend.title": "পড়াশোনার ধারা", "trend.range": "চার্টের সময়কাল", "trend.prev": "আগের সময়কাল", "trend.next": "পরের সময়কাল", "trend.chartLbl": "পড়াশোনার ধারার চার্ট। প্রতিটি বার দেখতে বাম ও ডান তীর চাপুন।", "trend.avgNote": "গড় = মোট ÷ প্রথম রেকর্ডের পর থেকে দিন। রেকর্ড নেই এমন দিন 0 ঘণ্টা ধরা হয়; লক্ষ্য শুধু ওই দিনগুলোতে প্রযোজ্য।", "trend.bySubject": "বিষয় অনুযায়ী (এই সময়কাল)", "trend.table": "টেবিল হিসেবে দেখুন", "trend.empty": "এই সময়কালে কোনো পড়াশোনা রেকর্ড হয়নি। অন্য সময়কাল দেখতে ‹ › ব্যবহার করুন।", "trend.emptyNone": "এখনো কোনো পড়াশোনার ডেটা নেই। হোমে প্রথম সেশন যোগ করুন, বা একটি ফোকাস সেশন শেষ করুন — তাহলে এখানে ধারা দেখা যাবে।", "legend.hit": "লক্ষ্য পূরণ", "legend.below": "লক্ষ্যের নিচে", "legend.target": "প্রতি {u} লক্ষ্য", "legend.zero": "শূন্য রেকর্ড", "legend.blank": "ফাঁকা = রেকর্ড নেই", "legend.start": "বার 0 ঘণ্টা থেকে শুরু", "unit.day": "দিন", "unit.week": "সপ্তাহ", "unit.month": "মাস", "unit.hours": "ঘণ্টা", "txt.sum": "{label}: {trk} দিনের মধ্যে {act} দিন পড়েছেন, মোট {total} (ট্র্যাক করা প্রতি দিনে গড় {avg})", "txt.best": "; সেরা দিন {day}, {dur}", "txt.reach": "; দৈনিক লক্ষ্য {n} দিন পূরণ হয়েছে", "det.before": "প্রথম রেকর্ডের আগে", "det.none": "এই দিনের কোনো রেকর্ড নেই", "det.zero": "শূন্য রেকর্ড — পড়াশোনা হয়নি", "det.pct": "দৈনিক লক্ষ্যের {p}%", "det.reached": " ✓ পূরণ", "det.activeOf": "{b} দিনের মধ্যে {a} দিন সক্রিয়", "det.targetOf": "{d} লক্ষ্যের {p}%", "det.perActive": "সক্রিয় দিনে গড় {d}", "sess.one": "১ সেশন", "sess.many": "{n} সেশন", "heat.title": "পড়াশোনার কার্যকলাপ", "heat.label": "পড়াশোনার ক্যালেন্ডার, শেষ ১৮ সপ্তাহ। দিনগুলোর মধ্যে যেতে তীর চাপুন।", "heat.sum": "শেষ ১৮ সপ্তাহ: {a} দিন সক্রিয়, {b} দিন দৈনিক লক্ষ্য পূরণ হয়েছে।", "heat.pick": "একটি দিন বাছুন", "heat.outside": "এই তারিখটি শেষ ১৮ সপ্তাহের বাইরে।", "heat.noData": "এখনো কোনো ডেটা নেই। একটি সেশন যোগ করলে ক্যালেন্ডার ভরতে শুরু করবে।", "heat.legNo": "রেকর্ড নেই", "heat.legToday": "আজ", "heat.legZero": "শূন্য রেকর্ড", "heat.legTarget": "≥100% দৈনিক লক্ষ্য", "sum.total": "মোট পড়াশোনা", "sum.avgTracked": "গড় / ট্র্যাক করা দিন", "sum.avgActive": "গড় / সক্রিয় দিন", "sum.active": "সক্রিয় দিন", "sum.best": "সেরা দিন", "sum.targetDays": "লক্ষ্য পূরণের দিন", "sum.streak": "ধারাবাহিকতা (সব সময়)", "sum.vsTarget": "মোট বনাম লক্ষ্য", "streak.now": "{c} বর্তমান · {l} সর্বোচ্চ", "tbl.studied": "পড়া হয়েছে", "tbl.target": "লক্ষ্য", "tbl.noRec": "রেকর্ড নেই", "mon.heading": "মাসিক সারাংশ", "mon.total": "এই মাসে মোট", "mon.avg": "গড় (পড়ার দিন)", "mon.best": "সেরা দিন", "mon.active": "সক্রিয় দিন", "mon.reach": "লক্ষ্য পূরণ", "mon.prev": "আগের মাসের তুলনা", "mon.dayCount": "{b} দিনের মধ্যে {a} দিন", "mon.reachCount": "{b} দিনের মধ্যে {a} দিন ({p}%)", "mon.noPrev": "{cur} (আগের মাসের ডেটা নেই)", "adv.title": "বিস্তারিত পরিসংখ্যান", "adv.more": "আরও দেখুন", "adv.totalStudy": "মোট পড়াশোনা", "adv.avgStudy": "গড় পড়াশোনা", "adv.days": "পড়ার দিন", "adv.cur": "বর্তমান ধারাবাহিকতা", "adv.longest": "সবচেয়ে বড় ধারাবাহিকতা", "adv.bestDay": "সেরা পড়ার দিন", "adv.targetRate": "লক্ষ্য পূরণ (সক্রিয় দিনের মধ্যে)", "adv.dayWord": "দিন", "ach.title": "অর্জন", "ach.unlocked": "অর্জিত: {name}", "ach.first": "প্রথম ঘণ্টা", "ach.d.first": "মোট ১ ঘণ্টা পড়ুন", "ach.goal": "লক্ষ্য পূরণ", "ach.d.goal": "দৈনিক লক্ষ্য পূরণ করুন", "ach.streak7": "৭ দিনের ধারাবাহিকতা", "ach.d.streak7": "টানা ৭ দিন পড়ুন", "ach.h50": "৫০ ঘণ্টা", "ach.d.h50": "মোট ৫০ ঘণ্টা পড়ুন", "ach.h100": "১০০ ঘণ্টা", "ach.d.h100": "মোট ১০০ ঘণ্টা পড়ুন", "ach.streak30": "৩০ দিনের ধারাবাহিকতা", "ach.d.streak30": "টানা ৩০ দিন পড়ুন", "sub.title": "বিষয় অনুযায়ী · সব সময়", "sub.none": "বিষয় নেই", "sub.empty": "বিষয়সহ পড়াশোনার সময় সেভ করলে এখানে বিভাজন দেখা যাবে।", "sub.noneP": "এই সময়কালে কোনো পড়াশোনা নেই।", "sub.all": "সব বিষয়", "sub.optNone": "— বিষয় নেই —", "hist.title": "ইতিহাস", "hist.img": "ছবি হিসেবে সেভ", "hist.imgAria": "ছবি হিসেবে সেভ করুন", "hist.search": "বিষয় বা নোট খুঁজুন", "hist.searchLbl": "খুঁজুন", "hist.monthLbl": "মাস", "hist.allMonths": "সব মাস", "hist.subjLbl": "বিষয়", "hist.sortLbl": "সাজানোর ক্রম", "hist.newest": "নতুন আগে", "hist.oldest": "পুরোনো আগে", "hist.empty": "এখনো কোনো সেশন নেই। হোমে সময় লিখে সেভ চাপুন।", "hist.noMatch": "এই খোঁজ বা ফিল্টারের সঙ্গে কোনো সেশন মেলেনি।", "hist.days": "{n} দিন", "hist.sess": "{n}টি সেশন", "hist.timer": "টাইমার", "hist.manual": "ম্যানুয়াল", "hist.dayTotal": "দিনের মোট {d}", "hist.todayBadge": "আজ", "hist.goal": "✓ লক্ষ্য", "hist.edit": "সেশন সম্পাদনা", "hist.del": "সেশন মুছুন", "set.title": "সেটিংস", "set.target": "দৈনিক লক্ষ্য (ঘণ্টা)", "nav.profile": "প্রোফাইল", "prof.create": "প্রোফাইল তৈরি করুন", "prof.hint": "শুরু করতে আপনার নাম লিখুন।", "prof.name": "নাম", "prof.continue": "চালিয়ে যান", "prof.title": "প্রোফাইল", "prof.edit": "নাম পরিবর্তন", "prof.save": "সংরক্ষণ", "prof.cancel": "বাতিল", "prof.empty": "নাম লিখুন।", "prof.saved": "নাম সংরক্ষিত", "set.appearance": "চেহারা", "set.theme": "থিম", "set.light": "লাইট", "set.dark": "ডার্ক", "set.study": "পড়াশোনা", "set.data": "ডেটা", "set.back": "পিছনে", "set.sub": "পছন্দ ও আপনার ডেটা", "set.prefs": "পছন্দ", "set.data": "ডেটা ব্যবস্থাপনা", "set.font": "ফন্ট", "set.lang": "ভাষা", "set.langBn": "বাংলা", "set.langEn": "English", "set.targetErr": "লক্ষ্য 1 থেকে 24 ঘণ্টার মধ্যে হতে হবে।", "set.export": "ডেটা এক্সপোর্ট", "set.import": "ডেটা ইমপোর্ট", "set.reset": "সব ডেটা মুছুন", "set.restore": "সর্বশেষ ব্যাকআপ ফিরিয়ে আনুন", "set.recInfo": "সর্বশেষ ব্যাকআপ: {when} ({reason})", "set.recNone": "এই ব্রাউজারে এখনো কোনো ব্যাকআপ নেই।", "reason.import": "ইমপোর্টের আগে", "reason.reset": "মুছে ফেলার আগে", "reason.restore": "ফিরিয়ে আনার আগে", "exp.done": "{n}টি সেশন নিয়ে এক্সপোর্ট ফাইল তৈরি হয়েছে।", "exp.raw": "সংরক্ষিত ডেটা ত্রুটিপূর্ণ, তাই মূল লেখাটি অপরিবর্তিত এক্সপোর্ট হয়েছে।", "exp.fail": "এক্সপোর্ট ব্যর্থ: {reason}", "imp.done": "ইমপোর্ট সম্পন্ন: {n}টি সেশন ফিরে এসেছে। আগের ডেটা ব্যাকআপ হিসেবে রাখা হয়েছে (সেটিংস → ফিরিয়ে আনুন)।", "imp.fail": "ইমপোর্ট ব্যর্থ: {reason}। আপনার বর্তমান ডেটা অপরিবর্তিত আছে।", "imp.confirm": "ইমপোর্ট করলে বর্তমান ডেটা বদলে যাবে। আগে বর্তমান ডেটার একটি ব্যাকআপ রাখা হবে। চালিয়ে যাবেন?", "imp.btn": "ইমপোর্ট", "reset.confirm": "আপনি কি সত্যিই সব পড়াশোনার ডেটা মুছতে চান? আগে বর্তমান ডেটার একটি ব্যাকআপ রাখা হবে, সেটিংস থেকে ফিরিয়ে আনা যাবে।", "reset.btn": "সব মুছুন", "reset.done": "সব ডেটা মুছে ফেলা হয়েছে। আগের ডেটার একটি ব্যাকআপ রাখা হয়েছে।", "restore.confirm": "{when}-এর ব্যাকআপ ফিরিয়ে আনবেন? বর্তমান ডেটা আগে ব্যাকআপ হবে।", "restore.btn": "ফিরিয়ে আনুন", "restore.done": "ব্যাকআপ ফিরিয়ে আনা হয়েছে।", "restore.fail": "ফিরিয়ে আনা ব্যর্থ: {reason}", "undo.msg": "সেশন মুছে ফেলা হয়েছে।", "undo.btn": "আনডু", "undo.done": "সেশন ফিরিয়ে আনা হয়েছে।", "del.confirm": "{date}-এর সেশনটি ({dur}) মুছবেন?", "dlg.delete": "মুছুন", "dlg.ok": "নিশ্চিত করুন", "dlg.cancel": "বাতিল", "img.title": "পড়াশোনার ইতিহাস", "img.total": "মোট পড়াশোনা", "img.days": "পড়ার দিন", "img.streak": "বর্তমান ধারাবাহিকতা", "img.footer": "Study Time Tracker", "e.json": "ফাইলটি সঠিক JSON নয়", "e.notBackup": "এটি Study Time Tracker-এর ব্যাকআপ ফাইল নয়", "e.version": "নতুন বা অজানা ভার্সনে তৈরি", "e.tooMany": "সেশনের সংখ্যা অনেক বেশি", "e.sessInvalid": "সেশন {n} সঠিক নয়", "e.sessSrc": "সেশন {n}: অজানা উৎস", "e.sessDate": "সেশন {n}: তারিখ সঠিক নয়", "e.sessMin": "সেশন {n}: সময়কাল সঠিক নয়", "e.sessId": "সেশন {n}: আইডি সঠিক নয় বা একই", "e.sessTime": "সেশন {n}: সময়ের মান সঠিক নয়", "e.entry": "{d}-এর মোট সময় সঠিক নয়", "e.over24": "{d}-এ ২৪ ঘণ্টার বেশি", "e.settings": "সেটিংস সঠিক নয়", "e.target": "দৈনিক লক্ষ্য সঠিক নয়", "e.theme": "থিম সঠিক নয়", "e.lang": "ভাষা সঠিক নয়", "e.subjects": "বিষয়ের তালিকা সঠিক নয়", "e.big": "ফাইলটি ১০ MB-এর চেয়ে বড়", "e.unknown": "অজানা ত্রুটি", "e.backupWrite": "মাইগ্রেশন ব্যাকআপ লেখা যায়নি", "banner.lock": "ডেটা আপগ্রেড ব্যর্থ ({reason})। আপনার মূল ডেটা অপরিবর্তিত আছে, পরিবর্তন বন্ধ রাখা হয়েছে। ব্যাকআপ কী: {key}", "foot.by": "ডিজাইন ও ডেভেলপ করেছেন", "foot.copy": "© {y} Study Time Tracker"}};
+Object.assign(I18N.en,{"banner.lock": "Saved data could not be loaded ({reason}). Your stored data is untouched and changes are disabled.", "banner.backup": " Backup copy: {key}", "lock.resetConfirm": "The saved data could not be read. Resetting deletes it, but the unreadable original text is kept in this browser as a backup first. Continue?"});
+Object.assign(I18N.bn,{"banner.lock": "সংরক্ষিত ডেটা লোড করা যায়নি ({reason})। আপনার ডেটা অপরিবর্তিত আছে এবং পরিবর্তন বন্ধ রাখা হয়েছে।", "banner.backup": " ব্যাকআপ কপি: {key}", "lock.resetConfirm": "সংরক্ষিত ডেটা পড়া যায়নি। রিসেট করলে তা মুছে যাবে, তবে পড়া না যাওয়া মূল লেখাটি আগে এই ব্রাউজারে ব্যাকআপ হিসেবে রাখা হবে। চালিয়ে যাবেন?"});
+Object.assign(I18N.en,{"prof.edit": "Edit profile", "prof.goal": "Daily goal", "prof.total": "Total study", "prof.streak": "Current streak", "prof.best": "Best day", "prof.change": "Change", "prof.photo": "Choose photo", "prof.rmphoto": "Remove photo", "prof.photoErr": "Could not read that image.", "acct.logout": "Log out", "acct.confirm": "Are you sure you want to log out?"});
+Object.assign(I18N.bn,{"prof.edit": "প্রোফাইল সম্পাদনা", "prof.goal": "প্রতিদিনের লক্ষ্য", "prof.total": "মোট পড়াশোনা", "prof.streak": "বর্তমান স্ট্রিক", "prof.best": "সেরা দিন", "prof.change": "পরিবর্তন", "prof.photo": "ছবি বেছে নিন", "prof.rmphoto": "ছবি সরান", "prof.photoErr": "ছবিটি পড়া যায়নি।", "acct.logout": "লগ আউট", "acct.confirm": "আপনি কি নিশ্চিতভাবে লগ আউট করতে চান?"});
+Object.assign(I18N.en,{"nav.exams":"Exams","exam.title":"Exams","exam.desc":"Track upcoming exams, countdowns and preparation checklists.","exam.add":"Add exam","exam.new":"New exam","exam.edit":"Edit","exam.del":"Delete","exam.none":"No exams yet","exam.noneD":"Add an exam to see how many days you have left.","exam.upcoming":"Upcoming","exam.past":"Finished","exam.noMatch":"No exams for this subject.","exam.name":"Exam name","exam.nameReq":"Enter an exam name.","exam.date":"Exam date","exam.dateReq":"Choose a valid exam date.","exam.time":"Start time (optional)","exam.room":"Location or room","exam.checklist":"Preparation checklist (one topic per line)","exam.notes":"Personal notes","exam.prepDone":"{d} of {n} done","exam.today":"Exam today","exam.tomorrow":"Exam tomorrow","exam.yesterday":"Passed yesterday","exam.in":"Exam in {n} days","exam.passed":"Passed {n} days ago","exam.delConfirm":"Delete \"{n}\"? This cannot be undone.","exam.homeTitle":"Upcoming exams","exam.all":"All exams","exam.homeNone":"No exams scheduled. Add one to see its countdown here."});
+Object.assign(I18N.bn,{"nav.exams":"পরীক্ষা","exam.title":"পরীক্ষা","exam.desc":"আসন্ন পরীক্ষা, কাউন্টডাউন ও প্রস্তুতির তালিকা দেখুন।","exam.add":"পরীক্ষা যোগ করুন","exam.new":"নতুন পরীক্ষা","exam.edit":"সম্পাদনা","exam.del":"মুছুন","exam.none":"এখনো কোনো পরীক্ষা নেই","exam.noneD":"একটি পরীক্ষা যোগ করলে বাকি দিনের হিসাব দেখা যাবে।","exam.upcoming":"আসন্ন","exam.past":"শেষ হয়েছে","exam.noMatch":"এই বিষয়ে কোনো পরীক্ষা নেই।","exam.name":"পরীক্ষার নাম","exam.nameReq":"পরীক্ষার একটি নাম লিখুন।","exam.date":"পরীক্ষার তারিখ","exam.dateReq":"সঠিক পরীক্ষার তারিখ বেছে নিন।","exam.time":"শুরুর সময় (ঐচ্ছিক)","exam.room":"স্থান বা রুম","exam.checklist":"প্রস্তুতির তালিকা (প্রতি লাইনে একটি বিষয়)","exam.notes":"ব্যক্তিগত নোট","exam.prepDone":"{d} / {n} সম্পন্ন","exam.today":"আজ পরীক্ষা","exam.tomorrow":"আগামীকাল পরীক্ষা","exam.yesterday":"গতকাল শেষ হয়েছে","exam.in":"পরীক্ষা {n} দিন পরে","exam.passed":"{n} দিন আগে শেষ হয়েছে","exam.delConfirm":"\"{n}\" পরীক্ষাটি মুছবেন? এটি ফেরানো যাবে না।","exam.homeTitle":"আসন্ন পরীক্ষা","exam.all":"সব পরীক্ষা","exam.homeNone":"কোনো পরীক্ষা নির্ধারিত নেই। যোগ করলে এখানে কাউন্টডাউন দেখাবে।"});
+Object.assign(I18N.en,{"nav.planner":"Study planner","pl.title":"Study planner","pl.desc":"Schedule study sessions, see your week, and track their status.","pl.add":"Add plan","pl.new":"New study plan","pl.edit":"Edit plan","pl.none":"No study plans yet","pl.noneD":"Plan a study session to see it on your day and week.","pl.day":"Day","pl.week":"Week","pl.upcoming":"Upcoming","pl.done":"Completed","pl.today":"Today","pl.prev":"Previous","pl.next":"Next","pl.empty":"Nothing planned","pl.name":"Plan title","pl.nameReq":"Enter a plan title.","pl.date":"Date","pl.start":"Start time","pl.end":"End time","pl.endBad":"Choose a start and end time, with the end after the start.","pl.task":"Related task","pl.noTask":"No task","pl.status":"Status","pl.clash":"Overlaps","pl.clashWarn":"This overlaps \"{n}\". Press Save again to keep both.","pl.delConfirm":"Delete \"{n}\"? This cannot be undone.","pl.to.planned":"Reopen","pl.to.prog":"Start","pl.to.done":"Complete","pl.to.skip":"Skip","pst.planned":"Planned","pst.prog":"In progress","pst.done":"Completed","pst.skip":"Skipped","pl.homeTitle":"Study plan","pl.homeNone":"Nothing scheduled. Plan a session to see it here.","pl.open":"Open planner"});
+Object.assign(I18N.bn,{"nav.planner":"পড়ার পরিকল্পনা","pl.title":"পড়ার পরিকল্পনা","pl.desc":"পড়ার সময় ঠিক করুন, সপ্তাহ দেখুন এবং অবস্থা লক্ষ্য রাখুন।","pl.add":"পরিকল্পনা যোগ করুন","pl.new":"নতুন পরিকল্পনা","pl.edit":"পরিকল্পনা সম্পাদনা","pl.none":"এখনো কোনো পড়ার পরিকল্পনা নেই","pl.noneD":"একটি পড়ার সময় ঠিক করলে দিন ও সপ্তাহের দৃশ্যে দেখা যাবে।","pl.day":"দিন","pl.week":"সপ্তাহ","pl.upcoming":"আসন্ন","pl.done":"সম্পন্ন","pl.today":"আজ","pl.prev":"আগের","pl.next":"পরের","pl.empty":"কিছু ঠিক করা নেই","pl.name":"পরিকল্পনার নাম","pl.nameReq":"পরিকল্পনার একটি নাম লিখুন।","pl.date":"তারিখ","pl.start":"শুরুর সময়","pl.end":"শেষের সময়","pl.endBad":"শুরু ও শেষের সময় বেছে নিন, শেষের সময় শুরুর পরে হতে হবে।","pl.task":"সংশ্লিষ্ট কাজ","pl.noTask":"কোনো কাজ নেই","pl.status":"অবস্থা","pl.clash":"সময় মিলছে","pl.clashWarn":"এটি \"{n}\" এর সাথে মিলছে। দুটোই রাখতে আবার সংরক্ষণ চাপুন।","pl.delConfirm":"\"{n}\" মুছবেন? এটি ফেরানো যাবে না।","pl.to.planned":"আবার পরিকল্পনা","pl.to.prog":"শুরু","pl.to.done":"সম্পন্ন","pl.to.skip":"বাদ দিন","pst.planned":"পরিকল্পিত","pst.prog":"চলছে","pst.done":"সম্পন্ন","pst.skip":"বাদ দেওয়া","pl.homeTitle":"পড়ার পরিকল্পনা","pl.homeNone":"কিছু ঠিক করা নেই। একটি পড়ার সময় ঠিক করলে এখানে দেখা যাবে।","pl.open":"পরিকল্পনা খুলুন"});
+Object.assign(I18N.en,{"more.grpProd":"Productivity","more.grpProg":"Progress & personal","more.desc":"All features, grouped by what you use them for."});
+Object.assign(I18N.bn,{"more.grpProd":"উৎপাদনশীলতা","more.grpProg":"অগ্রগতি ও ব্যক্তিগত","more.desc":"সব ফিচার, কাজ অনুযায়ী সাজানো।"});
+Object.assign(I18N.en,{"more.menu":"Menu"});Object.assign(I18N.bn,{"more.menu":"মেনু"});
+Object.assign(I18N.en,{"drawer.close":"Close menu"});Object.assign(I18N.bn,{"drawer.close":"মেনু বন্ধ করুন"});
+Object.assign(I18N.en,{"note.first":"Create your first note"});Object.assign(I18N.bn,{"note.first":"প্রথম নোট তৈরি করুন"});
+Object.assign(I18N.en,{"note.continue":"Continue last note","note.tip":"Tip: a clear title helps you find notes faster.","note.nCount":"{n} notes","note.tagsTab":"Tags","note.noMatchD":"Try another search or clear the filters.","note.clear":"Clear filters","note.oUpd":"Last updated","note.oNew":"Newest created","note.oOld":"Oldest first","note.oAz":"A–Z","note.sortLbl":"Sort notes","note.more":"More actions","note.open":"Open","note.pinOn":"Note pinned","note.pinOff":"Note unpinned","note.intro":"Capture lectures, formulas and reminders in one place."});
+Object.assign(I18N.bn,{"note.continue":"শেষ নোট খুলুন","note.tip":"টিপ: স্পষ্ট শিরোনাম থাকলে নোট দ্রুত খুঁজে পাবেন।","note.nCount":"{n}টি নোট","note.tagsTab":"ট্যাগ","note.noMatchD":"অন্যভাবে খুঁজুন বা ফিল্টার সরান।","note.clear":"ফিল্টার সরান","note.oUpd":"সর্বশেষ আপডেট","note.oNew":"সবচেয়ে নতুন","note.oOld":"পুরোনো আগে","note.oAz":"A–Z","note.sortLbl":"নোট সাজান","note.more":"আরও অপশন","note.open":"খুলুন","note.pinOn":"নোট পিন করা হয়েছে","note.pinOff":"পিন সরানো হয়েছে","note.intro":"লেকচার, সূত্র ও মনে রাখার বিষয় এক জায়গায় রাখুন।"});
+Object.assign(I18N.en,{"prof.bio": "Bio", "prof.bioHint": "Up to 160 characters.", "prof.since": "Tracking since {d}", "prof.noSince": "Your tracking history starts with your first session.", "prof.achTitle": "Achievements", "prof.achCount": "{n} of {t} unlocked", "prof.recent": "Recent activity", "prof.viewAll": "View all", "prof.insights": "See detailed stats in Insights", "prof.noSessions": "No study sessions yet. Start your first one from Focus."});Object.assign(I18N.bn,{"prof.bio": "পরিচিতি", "prof.bioHint": "সর্বোচ্চ ১৬০ অক্ষর।", "prof.since": "{d} থেকে ট্র্যাক করছেন", "prof.noSince": "প্রথম সেশনের পর থেকে আপনার ইতিহাস শুরু হবে।", "prof.achTitle": "অর্জন", "prof.achCount": "{t}টির মধ্যে {n}টি অর্জিত", "prof.recent": "সাম্প্রতিক কার্যকলাপ", "prof.viewAll": "সব দেখুন", "prof.insights": "বিস্তারিত পরিসংখ্যান Insights-এ দেখুন", "prof.noSessions": "এখনো কোনো পড়ার সেশন নেই। Focus থেকে প্রথম সেশন শুরু করুন।"});
+Object.assign(I18N.en,{"scat.profile": "Profile and account", "scat.profileD": "Your name, photo and personal details.", "scat.appearance": "Appearance and themes", "scat.appearanceD": "Light, dark and color themes, plus font.", "scat.language": "Language", "scat.languageD": "Bangla or English for the whole app.", "scat.study": "Study and timer", "scat.studyD": "Daily target and custom timer lengths.", "scat.notif": "Notifications", "scat.notifD": "Study reminders and when they arrive.", "scat.data": "Storage and data", "scat.dataD": "Export, import and back up your records.", "scat.privacy": "Privacy and security", "scat.privacyD": "Where your data is kept and how to clear it.", "scat.help": "Help and support", "scat.helpD": "Answers to common questions.", "scat.about": "About", "scat.aboutD": "What this app is and who made it.", "about.desc": "Track study time, plan sessions, keep notes and see your progress in one place.", "set.storeUse": "This app uses about {kb} KB in this browser.", "faq.q1": "How do I start tracking study time?", "faq.a1": "Open Focus and press start. When you stop the session, its time is saved to your study records.", "faq.q2": "Why are my reminders not showing?", "faq.a2": "Reminders are checked only while this app is open. For browser notifications, allow them in your browser site settings. The Notifications section shows the current status.", "faq.q3": "How do I back up my data?", "faq.a3": "Open Storage and data and choose Export data. To restore, choose Import data and pick the backup file."});Object.assign(I18N.bn,{"scat.profile": "প্রোফাইল ও অ্যাকাউন্ট", "scat.profileD": "আপনার নাম, ছবি ও ব্যক্তিগত তথ্য।", "scat.appearance": "থিম ও চেহারা", "scat.appearanceD": "লাইট, ডার্ক ও রঙের থিম, এবং ফন্ট।", "scat.language": "ভাষা", "scat.languageD": "পুরো অ্যাপের জন্য বাংলা বা ইংরেজি।", "scat.study": "পড়া ও টাইমার", "scat.studyD": "দৈনিক লক্ষ্য ও কাস্টম টাইমারের সময়।", "scat.notif": "নোটিফিকেশন", "scat.notifD": "পড়ার রিমাইন্ডার ও তার সময়।", "scat.data": "স্টোরেজ ও ডেটা", "scat.dataD": "রেকর্ড এক্সপোর্ট, ইমপোর্ট ও ব্যাকআপ।", "scat.privacy": "গোপনীয়তা ও নিরাপত্তা", "scat.privacyD": "ডেটা কোথায় থাকে এবং কীভাবে মুছবেন।", "scat.help": "সাহায্য ও সহায়তা", "scat.helpD": "সাধারণ প্রশ্নের উত্তর।", "scat.about": "পরিচিতি", "scat.aboutD": "এই অ্যাপ কী এবং কে বানিয়েছেন।", "about.desc": "এক জায়গায় পড়ার সময় ট্র্যাক করুন, সেশন পরিকল্পনা করুন, নোট রাখুন ও অগ্রগতি দেখুন।", "set.storeUse": "এই অ্যাপ এই ব্রাউজারে প্রায় {kb} KB ব্যবহার করছে।", "faq.q1": "পড়ার সময় কীভাবে ট্র্যাক করব?", "faq.a1": "Focus খুলে শুরু চাপুন। সেশন শেষ করলে সময়টি আপনার পড়ার রেকর্ডে সেভ হবে।", "faq.q2": "রিমাইন্ডার কেন দেখা যাচ্ছে না?", "faq.a2": "রিমাইন্ডার শুধু তখনই যাচাই হয় যখন এই অ্যাপ খোলা থাকে। ব্রাউজার নোটিফিকেশনের জন্য ব্রাউজারের সাইট সেটিংসে অনুমতি দিন। নোটিফিকেশন অংশে বর্তমান অবস্থা দেখানো হয়।", "faq.q3": "ডেটার ব্যাকআপ কীভাবে নেব?", "faq.a3": "স্টোরেজ ও ডেটা খুলে Export data বেছে নিন। ফিরিয়ে আনতে Import data বেছে ব্যাকআপ ফাইলটি দিন।"});
+Object.assign(I18N.en,{"set.sub": "Manage your account, preferences and more.", "set.editProf": "Edit profile", "set.editBtn": "Edit"});Object.assign(I18N.bn,{"set.sub": "আপনার অ্যাকাউন্ট, পছন্দ ও আরও কিছু পরিচালনা করুন।", "set.editProf": "প্রোফাইল সম্পাদনা", "set.editBtn": "সম্পাদনা"});
+Object.assign(I18N.en,{"set.remOnD": "Turn reminders on or off. When off, the options below do not run.", "set.remTaskD": "Get a reminder before a task deadline.", "set.remExamD": "Get a reminder before an exam, using the lead time below.", "set.remPlanD": "Get a reminder before a scheduled study session, using the time below.", "set.remGoalD": "Get a reminder at the daily goal time set below.", "set.remBkD": "Get a reminder to back up your data.", "menu.seeProfile": "See your profile"});Object.assign(I18N.bn,{"set.remOnD": "রিমাইন্ডার চালু বা বন্ধ করুন। বন্ধ থাকলে নিচের বিকল্পগুলো কাজ করবে না।", "set.remTaskD": "কাজের শেষ সময়ের আগে রিমাইন্ডার পাবেন।", "set.remExamD": "নিচে ঠিক করা সময় আগে পরীক্ষার রিমাইন্ডার পাবেন।", "set.remPlanD": "পরিকল্পিত পড়ার সময়ের আগে রিমাইন্ডার পাবেন।", "set.remGoalD": "নিচে ঠিক করা সময়ে দৈনিক লক্ষ্যের রিমাইন্ডার পাবেন।", "set.remBkD": "ডেটা ব্যাকআপ নেওয়ার রিমাইন্ডার পাবেন।", "menu.seeProfile": "আপনার প্রোফাইল দেখুন"});
+Object.assign(I18N.en,{"nav.calendar":"Calendar","cv.title":"Calendar","cv.prev":"Previous","cv.next":"Next","cv.today":"Today","cv.plan":"Study plan","cv.task":"Task due","cv.exam":"Exam","cv.none":"Nothing on this day.","cv.newPlan":"New plan","cv.newTask":"New task","cv.newExam":"New exam","cv.done":"Done"});
+Object.assign(I18N.bn,{"nav.calendar":"ক্যালেন্ডার","cv.title":"ক্যালেন্ডার","cv.prev":"আগের","cv.next":"পরের","cv.today":"আজ","cv.plan":"পড়ার পরিকল্পনা","cv.task":"কাজের শেষ সময়","cv.exam":"পরীক্ষা","cv.none":"এই দিনে কিছু নেই।","cv.newPlan":"নতুন পরিকল্পনা","cv.newTask":"নতুন কাজ","cv.newExam":"নতুন পরীক্ষা","cv.done":"সম্পন্ন"});
+Object.assign(I18N.en,{"nav.sites":"My websites","site.title":"My websites","site.desc":"Showcase the websites and web projects you have built.","site.add":"Add project","site.new":"New project","site.edit":"Edit project","site.none":"No projects yet","site.noneD":"Add a project you have built to show it here with its link.","site.noMatch":"No projects match your search or filters.","site.search":"Search by name","site.allCat":"All categories","site.allSt":"All statuses","site.sortName":"Name A to Z","site.sortNew":"Newest first","site.sortOld":"Oldest first","site.name":"Project name","site.nameReq":"Enter a project name.","site.url":"Website address","site.urlReq":"Enter the website address.","site.urlBad":"Enter a valid http or https address. Other kinds of links are not allowed.","site.thumb":"Cover image address (optional)","site.thumbBad":"The cover image address must be a valid http or https link.","site.cat":"Category","site.date":"Created on","site.tags":"Technologies (comma separated)","site.visit":"Visit website","site.dup":"A project with this address already exists.","site.delConfirm":"Delete \"{n}\"? This cannot be undone.","site.cat.web":"Website","site.cat.app":"Web app","site.cat.tool":"Tool","site.cat.portfolio":"Portfolio","site.cat.other":"Other","site.st.prog":"In progress","site.st.done":"Completed"});
+Object.assign(I18N.bn,{"nav.sites":"আমার ওয়েবসাইট","site.title":"আমার ওয়েবসাইট","site.desc":"আপনার তৈরি ওয়েবসাইট ও ওয়েব প্রকল্প এখানে দেখান।","site.add":"প্রকল্প যোগ করুন","site.new":"নতুন প্রকল্প","site.edit":"প্রকল্প সম্পাদনা","site.none":"এখনো কোনো প্রকল্প নেই","site.noneD":"আপনার তৈরি একটি প্রকল্প যোগ করলে তার লিংকসহ এখানে দেখা যাবে।","site.noMatch":"খোঁজ বা ফিল্টারের সাথে মেলে এমন প্রকল্প নেই।","site.search":"নাম দিয়ে খুঁজুন","site.allCat":"সব ধরন","site.allSt":"সব অবস্থা","site.sortName":"নাম অনুযায়ী","site.sortNew":"নতুন আগে","site.sortOld":"পুরনো আগে","site.name":"প্রকল্পের নাম","site.nameReq":"প্রকল্পের একটি নাম লিখুন।","site.url":"ওয়েবসাইটের ঠিকানা","site.urlReq":"ওয়েবসাইটের ঠিকানা লিখুন।","site.urlBad":"সঠিক http বা https ঠিকানা লিখুন। অন্য ধরনের লিংক অনুমোদিত নয়।","site.thumb":"কভার ছবির ঠিকানা (ঐচ্ছিক)","site.thumbBad":"কভার ছবির ঠিকানা অবশ্যই সঠিক http বা https লিংক হতে হবে।","site.cat":"ধরন","site.date":"তৈরির তারিখ","site.tags":"প্রযুক্তি (কমা দিয়ে আলাদা করুন)","site.visit":"ওয়েবসাইট দেখুন","site.dup":"এই ঠিকানায় আগে থেকেই একটি প্রকল্প আছে।","site.delConfirm":"\"{n}\" মুছবেন? এটি ফেরানো যাবে না।","site.cat.web":"ওয়েবসাইট","site.cat.app":"ওয়েব অ্যাপ","site.cat.tool":"টুল","site.cat.portfolio":"পোর্টফোলিও","site.cat.other":"অন্যান্য","site.st.prog":"চলছে","site.st.done":"সম্পন্ন"});
+Object.assign(I18N.en,{"c.sort":"Sort"});
+Object.assign(I18N.bn,{"c.sort":"সাজান"});
+Object.assign(I18N.en,{"lib.name":"Resource title","nav.library":"Study library","lib.title":"Study library","lib.desc":"Keep useful links, tutorials, books and documents organized by subject.","lib.add":"Add resource","lib.new":"New resource","lib.edit":"Edit resource","lib.none":"No resources yet","lib.noneD":"Save useful links, tutorials, books and documents here.","lib.noMatch":"No resources match your search or filters.","lib.search":"Search titles and descriptions","lib.allType":"All types","lib.allRes":"All resources","lib.onlyFav":"Favorites only","lib.sortTitle":"Title A to Z","lib.nameReq":"Enter a resource title.","lib.type":"Type","lib.url":"Web address (optional)","lib.urlBad":"Enter a valid http or https address.","lib.locF":"Location, for a book or file (optional)","lib.loc":"Location","lib.need":"Add a web address or a location.","lib.dup":"A resource with this address already exists.","lib.tags":"Tags (comma separated)","lib.open":"Open resource","lib.fav":"Add to favorites","lib.unfav":"Remove from favorites","lib.delConfirm":"Delete \"{n}\"? This cannot be undone.","lib.t.link":"Link","lib.t.tutorial":"Tutorial","lib.t.video":"Video","lib.t.article":"Article","lib.t.doc":"Document","lib.t.book":"Book","lib.t.ref":"Reference","lib.t.other":"Other","pl.focus":"Start focus","pl.res":"Resources","pf.busy":"Finish or reset the current focus session first."});
+Object.assign(I18N.bn,{"lib.name":"রিসোর্সের শিরোনাম","nav.library":"পড়ার লাইব্রেরি","lib.title":"পড়ার লাইব্রেরি","lib.desc":"দরকারী লিংক, টিউটোরিয়াল, বই ও নথি বিষয় অনুযায়ী গুছিয়ে রাখুন।","lib.add":"রিসোর্স যোগ করুন","lib.new":"নতুন রিসোর্স","lib.edit":"রিসোর্স সম্পাদনা","lib.none":"এখনো কোনো রিসোর্স নেই","lib.noneD":"দরকারী লিংক, টিউটোরিয়াল, বই ও নথি এখানে সংরক্ষণ করুন।","lib.noMatch":"খোঁজ বা ফিল্টারের সাথে মেলে এমন রিসোর্স নেই।","lib.search":"শিরোনাম ও বিবরণে খুঁজুন","lib.allType":"সব ধরন","lib.allRes":"সব রিসোর্স","lib.onlyFav":"শুধু পছন্দের","lib.sortTitle":"শিরোনাম অনুযায়ী","lib.nameReq":"রিসোর্সের একটি শিরোনাম লিখুন।","lib.type":"ধরন","lib.url":"ওয়েব ঠিকানা (ঐচ্ছিক)","lib.urlBad":"সঠিক http বা https ঠিকানা লিখুন।","lib.locF":"অবস্থান, বই বা ফাইলের জন্য (ঐচ্ছিক)","lib.loc":"অবস্থান","lib.need":"একটি ওয়েব ঠিকানা বা অবস্থান লিখুন।","lib.dup":"এই ঠিকানায় আগে থেকেই একটি রিসোর্স আছে।","lib.tags":"ট্যাগ (কমা দিয়ে আলাদা করুন)","lib.open":"রিসোর্স খুলুন","lib.fav":"পছন্দের তালিকায় যোগ করুন","lib.unfav":"পছন্দের তালিকা থেকে সরান","lib.delConfirm":"\"{n}\" মুছবেন? এটি ফেরানো যাবে না।","lib.t.link":"লিংক","lib.t.tutorial":"টিউটোরিয়াল","lib.t.video":"ভিডিও","lib.t.article":"প্রবন্ধ","lib.t.doc":"নথি","lib.t.book":"বই","lib.t.ref":"রেফারেন্স","lib.t.other":"অন্যান্য","pl.focus":"ফোকাস শুরু করুন","pl.res":"রিসোর্স","pf.busy":"আগে চলমান ফোকাস সেশন শেষ বা রিসেট করুন।"});
+Object.assign(I18N.en,{"nav.notifs": "Notifications", "nf.title": "Notifications", "nf.desc": "Reminders and alerts from your tasks, exams, study plans and goals.", "nf.all": "All", "nf.unread": "Unread", "nf.markAll": "Mark all read", "nf.clear": "Clear all", "nf.clearConfirm": "Clear all notifications? This cannot be undone.", "nf.none": "No notifications yet", "nf.noneD": "Reminders appear here when a task is due, an exam is near, a study session is about to start, or your daily goal is still open.", "nf.noUnread": "No unread notifications.", "nf.open": "Open", "nf.markRead": "Mark read", "nf.markUnread": "Mark unread", "nf.gone": "That item was deleted, so there is nothing to open.", "nf.k.task": "Task", "nf.k.exam": "Exam", "nf.k.plan": "Study session", "nf.k.goal": "Daily goal", "nf.k.backup": "Backup", "nf.taskOverT": "Overdue: {n}", "nf.taskOverM": "This task was due on {d}.", "nf.taskTodayT": "Due today: {n}", "nf.taskTodayM": "Mark it done in Tasks when you finish.", "nf.examT": "Exam: {n}", "nf.examM": "{when}.", "nf.planT": "Starting soon: {n}", "nf.planM": "Scheduled to start at {t}.", "nf.goalT": "Daily goal not reached yet", "nf.goalM": "{n} minutes left to reach today's target.", "nf.backupT": "Back up your data", "nf.backupM": "No backup in the last two weeks. Export one from Settings.", "set.timerHd": "Timer", "set.focusDef": "Custom focus length (minutes)", "set.breakDef": "Custom break length (minutes)", "set.timerNote": "Used by the Custom timer mode. The 25 and 50 minute modes stay fixed.", "set.timerBusy": "Finish or reset the running session before changing this.", "set.durErr": "Enter a whole number from {lo} to {hi}.", "set.notif": "Notifications and reminders", "set.remOn": "Turn on reminders", "set.remTask": "Task deadlines", "set.remExam": "Upcoming exams", "set.remPlan": "Scheduled study sessions", "set.remGoal": "Daily study goal", "set.remBk": "Backup reminders", "set.examLead": "Exam reminder, days before", "set.examLeadErr": "Enter a whole number from 1 to 14.", "set.planLead": "Session reminder, minutes before", "set.goalTime": "Daily goal reminder time", "set.goalErr": "Choose a time in 24-hour format, such as 20:00.", "set.permAsk": "Allow browser notifications", "set.permGranted": "Browser notifications are allowed. They appear only while this page is open.", "set.permDenied": "Browser notifications are blocked. Change this in the browser's site settings to receive them.", "set.permNone": "Browser notifications are not allowed yet. Allowing them is optional.", "set.permNA": "This browser does not support notifications. Reminders still appear in the Notification Center.", "set.remNote": "Reminders are checked only while this app is open. A closed tab cannot show them, so every reminder is also saved in the Notification Center.", "set.lastExp": "Last export: {when}", "set.neverExp": "No backup has been exported yet.", "prefs.reset": "Reset preferences", "prefs.resetConfirm": "Reset the custom timer lengths and all reminder settings to their defaults? Your daily target, language, theme and study data stay as they are.", "prefs.done": "Preferences reset to their defaults.", "reset.all": "Reset all data? Your current data is first saved to the recovery slot, so you can restore it. Study history, subjects, tasks, notes, plans, exams, websites, library items and notifications are cleared. Only language and theme are kept.", "imp.title": "Import backup", "imp.summary": "This backup has {s} study sessions and {p} planner records.", "imp.mode": "How should this backup be applied?", "imp.merge": "Merge: add what is not already here", "imp.replace": "Replace: use the backup's study history, settings, profile and photo", "imp.modeNote": "Merge keeps everything you have and skips records with the same ID. Replace swaps in the backup's study history, settings, profile, photo and preferences. Either way, your current data is saved to the recovery slot first.", "imp.doneMerge": "Merged: {a} sessions and {b} planner records added, {c} skipped as duplicates or over the daily limit."});
+Object.assign(I18N.bn,{"nav.notifs": "বিজ্ঞপ্তি", "nf.title": "বিজ্ঞপ্তি", "nf.desc": "আপনার কাজ, পরীক্ষা, পড়ার পরিকল্পনা ও লক্ষ্যের রিমাইন্ডার ও সতর্কতা।", "nf.all": "সব", "nf.unread": "অপঠিত", "nf.markAll": "সব পড়া হিসেবে চিহ্নিত করুন", "nf.clear": "সব মুছুন", "nf.clearConfirm": "সব বিজ্ঞপ্তি মুছবেন? এটি ফেরানো যাবে না।", "nf.none": "এখনো কোনো বিজ্ঞপ্তি নেই", "nf.noneD": "কাজের সময়সীমা, পরীক্ষা, পড়ার সময় বা দৈনিক লক্ষ্যের রিমাইন্ডার এখানে দেখা যাবে।", "nf.noUnread": "কোনো অপঠিত বিজ্ঞপ্তি নেই।", "nf.open": "খুলুন", "nf.markRead": "পড়া হিসেবে চিহ্নিত করুন", "nf.markUnread": "অপঠিত হিসেবে চিহ্নিত করুন", "nf.gone": "আইটেমটি মুছে ফেলা হয়েছে, তাই খোলার কিছু নেই।", "nf.k.task": "কাজ", "nf.k.exam": "পরীক্ষা", "nf.k.plan": "পড়ার সময়", "nf.k.goal": "দৈনিক লক্ষ্য", "nf.k.backup": "ব্যাকআপ", "nf.taskOverT": "সময় পেরিয়ে গেছে: {n}", "nf.taskOverM": "এই কাজের শেষ সময় ছিল {d}।", "nf.taskTodayT": "আজ শেষ সময়: {n}", "nf.taskTodayM": "শেষ হলে কাজ তালিকায় সম্পন্ন হিসেবে চিহ্নিত করুন।", "nf.examT": "পরীক্ষা: {n}", "nf.examM": "{when}।", "nf.planT": "শীঘ্রই শুরু: {n}", "nf.planM": "{t} সময়ে শুরু হওয়ার কথা।", "nf.goalT": "দৈনিক লক্ষ্য এখনো পূরণ হয়নি", "nf.goalM": "আজকের লক্ষ্যে পৌঁছাতে আরও {n} মিনিট বাকি।", "nf.backupT": "আপনার ডেটার ব্যাকআপ নিন", "nf.backupM": "গত দুই সপ্তাহে কোনো ব্যাকআপ নেই। সেটিংস থেকে একটি এক্সপোর্ট করুন।", "set.timerHd": "টাইমার", "set.focusDef": "কাস্টম ফোকাসের সময় (মিনিট)", "set.breakDef": "কাস্টম বিরতির সময় (মিনিট)", "set.timerNote": "কাস্টম টাইমার মোডে ব্যবহৃত হয়। ২৫ ও ৫০ মিনিটের মোড স্থির থাকে।", "set.timerBusy": "এটি বদলানোর আগে চলমান সেশন শেষ বা রিসেট করুন।", "set.durErr": "{lo} থেকে {hi} এর মধ্যে একটি পূর্ণ সংখ্যা লিখুন।", "set.notif": "বিজ্ঞপ্তি ও রিমাইন্ডার", "set.remOn": "রিমাইন্ডার চালু করুন", "set.remTask": "কাজের সময়সীমা", "set.remExam": "আসন্ন পরীক্ষা", "set.remPlan": "নির্ধারিত পড়ার সময়", "set.remGoal": "দৈনিক পড়ার লক্ষ্য", "set.remBk": "ব্যাকআপের রিমাইন্ডার", "set.examLead": "পরীক্ষার রিমাইন্ডার, কত দিন আগে", "set.examLeadErr": "১ থেকে ১৪ এর মধ্যে একটি পূর্ণ সংখ্যা লিখুন।", "set.planLead": "পড়ার সময়ের রিমাইন্ডার, কত মিনিট আগে", "set.goalTime": "দৈনিক লক্ষ্যের রিমাইন্ডারের সময়", "set.goalErr": "২৪ ঘণ্টার ফরম্যাটে একটি সময় বেছে নিন, যেমন ২০:০০।", "set.permAsk": "ব্রাউজার বিজ্ঞপ্তির অনুমতি দিন", "set.permGranted": "ব্রাউজার বিজ্ঞপ্তি অনুমোদিত। এই পাতা খোলা থাকলেই এগুলো দেখা যাবে।", "set.permDenied": "ব্রাউজার বিজ্ঞপ্তি বন্ধ আছে। পেতে হলে ব্রাউজারের সাইট সেটিংসে এটি বদলান।", "set.permNone": "ব্রাউজার বিজ্ঞপ্তির অনুমতি এখনো দেওয়া হয়নি। এটি ঐচ্ছিক।", "set.permNA": "এই ব্রাউজারে বিজ্ঞপ্তি সমর্থিত নয়। রিমাইন্ডার বিজ্ঞপ্তি কেন্দ্রে দেখা যাবে।", "set.remNote": "অ্যাপ খোলা থাকলেই রিমাইন্ডার যাচাই হয়। বন্ধ ট্যাবে এগুলো দেখানো যায় না, তাই প্রতিটি রিমাইন্ডার বিজ্ঞপ্তি কেন্দ্রেও সংরক্ষিত থাকে।", "set.lastExp": "শেষ এক্সপোর্ট: {when}", "set.neverExp": "এখনো কোনো ব্যাকআপ এক্সপোর্ট করা হয়নি।", "prefs.reset": "পছন্দ আবার ডিফল্টে ফিরিয়ে আনুন", "prefs.resetConfirm": "কাস্টম টাইমারের সময় ও সব রিমাইন্ডার সেটিং ডিফল্টে ফেরাবেন? দৈনিক লক্ষ্য, ভাষা, থিম ও পড়ার ডেটা আগের মতোই থাকবে।", "prefs.done": "পছন্দ ডিফল্টে ফিরিয়ে আনা হয়েছে।", "reset.all": "সব ডেটা রিসেট করবেন? বর্তমান ডেটা আগে রিকভারি স্লটে সংরক্ষিত হবে, যাতে ফিরিয়ে আনা যায়। পড়ার ইতিহাস, বিষয়, কাজ, নোট, পরিকল্পনা, পরীক্ষা, ওয়েবসাইট, লাইব্রেরি ও বিজ্ঞপ্তি মুছে যাবে। শুধু ভাষা ও থিম থাকবে।", "imp.title": "ব্যাকআপ আমদানি", "imp.summary": "এই ব্যাকআপে {s}টি পড়ার সেশন ও {p}টি পরিকল্পনার রেকর্ড আছে।", "imp.mode": "এই ব্যাকআপ কীভাবে প্রয়োগ হবে?", "imp.merge": "মার্জ: যা এখানে নেই তা যোগ করুন", "imp.replace": "রিপ্লেস: ব্যাকআপের পড়ার ইতিহাস, সেটিংস, প্রোফাইল ও ছবি ব্যবহার করুন", "imp.modeNote": "মার্জে আপনার সব ডেটা থাকে এবং একই আইডির রেকর্ড বাদ যায়। রিপ্লেসে ব্যাকআপের পড়ার ইতিহাস, সেটিংস, প্রোফাইল, ছবি ও পছন্দগুলো বসে। যেকোনো ক্ষেত্রে বর্তমান ডেটা আগে রিকভারি স্লটে সংরক্ষিত হয়।", "imp.doneMerge": "মার্জ সম্পন্ন: {a}টি সেশন ও {b}টি পরিকল্পনার রেকর্ড যোগ হয়েছে, {c}টি বাদ গেছে (ডুপ্লিকেট বা দৈনিক সীমার বেশি)।"});
+const BN_SHORT = ['জানু','ফেব্রু','মার্চ','এপ্রি','মে','জুন','জুলা','আগ','সেপ্ট','অক্টো','নভে','ডিসে'];
+const langNow = () => (typeof state!=='undefined' && state && state.settings && state.settings.lang==='en') ? 'en' : 'bn';
+const tr = (k, v) => { let s = I18N[langNow()][k]; if(s===undefined) s = I18N.en[k]; if(s===undefined) s = k;
+  if(v) s = s.replace(/\{(\w+)\}/g, (_,n) => (v[n]!==undefined ? v[n] : '')); return s; };
+const EN_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const monShort = m => langNow()==='bn' ? BN_SHORT[m] : EN_SHORT[m];
+/* Validation errors carry a translation key so the message follows the selected language */
+const E = (key, vars) => Object.assign(new Error(key), {key, vars: vars||{}});
+const errText = e => (e && e.key) ? tr(e.key, e.vars) : (e && e.name==='SyntaxError') ? tr('e.json') : tr('e.unknown');
+const ACHL = {'First Hour':['ach.first','ach.d.first'],'Goal Reached':['ach.goal','ach.d.goal'],'7 Day Streak':['ach.streak7','ach.d.streak7'],
+  '50 Hours':['ach.h50','ach.d.h50'],'100 Hours':['ach.h100','ach.d.h100'],'30 Day Streak':['ach.streak30','ach.d.streak30']};
+
+const BN_MONTHS = ['জানুয়ারি','ফেব্রুয়ারি','মার্চ','এপ্রিল','মে','জুন','জুলাই','আগস্ট','সেপ্টেম্বর','অক্টোবর','নভেম্বর','ডিসেম্বর'];
+const EN_MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const BN_DAYS = ['রবি','সোম','মঙ্গল','বুধ','বৃহ','শুক্র','শনি'];
+const EN_DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+let state;   // assigned by loadState() after the helpers below
+
+/* ================= Helpers ================= */
+const $ = id => document.getElementById(id);
+const bn = () => state.settings.lang === 'bn';
+let flashKey = null;
+const openM = {};                                      // month open/closed state in History                                   // newly saved date -> highlight animation
+let toastTimer;
+function toast(msg, ms){ const t = $('toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toastTimer); toastTimer = setTimeout(()=>t.classList.remove('on'), ms||1800); }
+const esc = t => String(t).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const pad = n => String(n).padStart(2,'0');
+const dkey = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const parse = k => { const [y,m,d] = k.split('-').map(Number); return new Date(y,m-1,d); };
+const today = () => dkey(new Date());
+const monthName = i => (bn()?BN_MONTHS:EN_MONTHS)[i];
+const short = k => { const d = parse(k); return `${d.getDate()} ${monthName(d.getMonth())}`; };
+const hm = min => `${Math.floor(min/60)}:${pad(min%60)}`;                       // 3:26
+function dur(min){                                                               // 8 ঘণ্টা ০৯ মিনিট
+  min = Math.round(min); const h = Math.floor(min/60), m = min%60;
+  return bn() ? `${h} ঘণ্টা ${pad(m)} মিনিট` : `${h} h ${pad(m)} min`;
+}
+const sortedKeys = () => Object.keys(state.entries).sort();
+
+/* ================= Data model: individual study sessions =================
+   Saved:   { v:4, sessions:[{id,date,min,sub,note,src,start,end}], settings, subjects, ach }
+   Derived: state.entries (date -> total minutes) is rebuilt from sessions by rebuild() and never saved.
+   Every total, streak, graph, subject breakdown and achievement reads that one source. */
+const BAK = KEY + '.backup-v3', SRCS = ['timer','manual','legacy'];
+const DEF_SUBJ = ['Programming','Android Development','Cyber Security','Database','English','Mathematics','Other'];
+let dataVer = 0;                                        // bumped on every rebuild(); keys the analytics caches
+let LOCKED = false, LOCK_ERR = null;                      // LOCKED: migration failed -> original data untouched, writes disabled
+const uid = () => 's' + Date.now().toString(36) + Math.random().toString(36).slice(2,8);
+const isDate = k => typeof k==='string' && /^\d{4}-\d{2}-\d{2}$/.test(k) && dkey(parse(k))===k;
+const isInt = (v,a,b) => Number.isInteger(v) && v>=a && v<=b;
+const cstr = (v,n) => typeof v==='string' ? v.trim().slice(0,n) : '';
+/* Preferences: validated on every load and restore, so older backups get safe defaults */
+const DEF_PREFS = {focusMin:25, breakMin:5, remOn:false, remTask:true, remExam:true, remPlan:true, remGoal:false, remBk:true, remRev:true, examLead:3, planLead:15, goalTime:'20:00', studyRemT:'', lastExp:''};
+function cleanPrefs(s){ const p = s && typeof s==='object' ? s : {}, bo = (v,d) => typeof v==='boolean' ? v : d;
+  return {focusMin: isInt(p.focusMin,1,180) ? p.focusMin : DEF_PREFS.focusMin, breakMin: isInt(p.breakMin,1,60) ? p.breakMin : DEF_PREFS.breakMin,
+    remOn: bo(p.remOn,false), remTask: bo(p.remTask,true), remExam: bo(p.remExam,true), remPlan: bo(p.remPlan,true), remGoal: bo(p.remGoal,false), remBk: bo(p.remBk,true), remRev: bo(p.remRev,true), studyRemT: /^([01]\d|2[0-3]):[0-5]\d$/.test(p.studyRemT||'') ? p.studyRemT : '',
+    examLead: isInt(p.examLead,1,14) ? p.examLead : DEF_PREFS.examLead, planLead: [5,15,30,60].includes(p.planLead) ? p.planLead : DEF_PREFS.planLead,
+    goalTime: /^([01]\d|2[0-3]):[0-5]\d$/.test(p.goalTime||'') ? p.goalTime : DEF_PREFS.goalTime,
+    lastExp: (typeof p.lastExp==='string' && !isNaN(Date.parse(p.lastExp))) ? p.lastExp : ''}; }
+const snap = () => ({v:4, sessions:state.sessions, settings:state.settings, subjects:state.subjects, ach:state.ach});
+function persist(){
+  if(LOCKED) return;
+  try{ localStorage.setItem(KEY, JSON.stringify(snap())); }catch(e){ toast(tr('v.storage')); }
+}
+function locked(){ if(LOCKED) toast(tr('v.locked')); return LOCKED; }
+/* Leaving the locked state never destroys the unreadable original: its raw text is kept under its own key first */
+function keepRawLocked(){
+  if(!LOCKED) return true;
+  try{ const raw = localStorage.getItem(KEY)||'', key = KEY+'.raw-locked-'+Date.now(); localStorage.setItem(key, raw); }catch(e){ return false; }
+  LOCKED = false; LOCK_ERR = null; showBanner(); return true;
+}
+function rebuild(){
+  dataVer++;
+  state.sessions.sort((a,b) => a.date<b.date?-1 : a.date>b.date?1 : ((a.start||0)-(b.start||0)) || (a.id<b.id?-1:1));
+  state.entries = {}; state.sessions.forEach(x => { state.entries[x.date] = (state.entries[x.date]||0) + x.min; });
+}
+const dayTotal = (k, skipId) => state.sessions.reduce((a,x) => a + (x.date===k && x.id!==skipId ? x.min : 0), 0);
+/* Validates stored / imported data (v4 or legacy daily totals) and returns a clean new state. Never mutates current state. */
+function checkData(d, lenient){                      // lenient = reading our own storage (no future-date rule)
+  if(!d || typeof d!=='object' || Array.isArray(d)) throw E('e.notBackup');
+  if(d.v!==undefined && !isInt(d.v,1,4)) throw E('e.version');
+  const out = {v:4, sessions:[], settings:{}, subjects:[], ach:null}, seen = new Set(), tot = {}, td = today();
+  if(Array.isArray(d.sessions)){
+    d.sessions.forEach((x,i) => {
+      const n = i+1;
+      if(!x || typeof x!=='object') throw E('e.sessInvalid',{n});
+      if(!SRCS.includes(x.src)) throw E('e.sessSrc',{n});
+      if(!isDate(x.date) || (!lenient && x.src!=='legacy' && x.date>dkey(new Date(Date.now()+864e5)))) throw E('e.sessDate',{n});
+      if(!isInt(x.min, x.src==='legacy'?0:1, 1440)) throw E('e.sessMin',{n});
+      if(typeof x.id!=='string' || !/^[\w-]{1,64}$/.test(x.id) || seen.has(x.id)) throw E('e.sessId',{n});
+      const st = x.start==null ? null : x.start, en = x.end==null ? null : x.end;
+      if([st,en].some(v => v!==null && !(Number.isFinite(v) && v>0))) throw E('e.sessTime',{n});
+      seen.add(x.id); out.sessions.push({id:x.id, date:x.date, min:x.min, sub:cstr(x.sub,30), note:cstr(x.note,140), src:x.src, start:st, end:en});
+    });
+  } else if(d.entries && typeof d.entries==='object' && !Array.isArray(d.entries)){        // legacy v2/v3: one total per day
+    const meta = d.meta && typeof d.meta==='object' ? d.meta : {};
+    Object.keys(d.entries).sort().forEach(k => {
+      const v = d.entries[k];
+      if(!isDate(k) || !Number.isFinite(v) || v<0 || v>1440) throw E('e.entry',{d:k});
+      const m = Object.prototype.hasOwnProperty.call(meta,k) && meta[k] && typeof meta[k]==='object' ? meta[k] : {};
+      out.sessions.push({id:'lg_'+k, date:k, min:Math.round(v), sub:cstr(m.s,30), note:cstr(m.n,140), src:'legacy', start:null, end:null});   // original total kept, nothing invented
+    });
+  } else throw E('e.notBackup');
+  out.sessions.forEach(x => { tot[x.date] = (tot[x.date]||0) + x.min; if(tot[x.date]>1440) throw E('e.over24',{d:x.date}); });
+  const s = d.settings===undefined ? {} : d.settings;
+  if(!s || typeof s!=='object' || Array.isArray(s)) throw E('e.settings');
+  if(s.targetMin!==undefined && !isInt(s.targetMin,60,1440)) throw E('e.target');
+  if(s.lang!==undefined && !['bn','en'].includes(s.lang)) throw E('e.lang');
+  const dark = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
+  const thmOk = typeof window.__thRes==='function' && (s.theme==='system' || window.__thRes(s.theme));
+  let thm = thmOk ? s.theme : 'system';
+  const thmSet = s.themeSet===true;
+  if(thm==='dark' && !thmSet) thm = 'system';   /* old default was dark and got saved; only an explicit choice keeps dark */
+  let gLang = null; try{ gLang = localStorage.getItem('studyTracker.lang'); }catch(e){}
+  out.settings = {targetMin:s.targetMin||600, theme:thm, themeSet:thmSet, lang:s.lang||(gLang==='bn' ? 'bn' : 'en'), ...cleanPrefs(s)};
+  const subs = d.subjects===undefined ? DEF_SUBJ : d.subjects;
+  if(!Array.isArray(subs) || subs.length>100 || subs.some(x => typeof x!=='string' || !x.trim() || x.trim().length>30)) throw E('e.subjects');
+  out.subjects = [...new Set(subs.map(x => x.trim()))];
+  out.sessions.forEach(x => { if(x.sub && !out.subjects.includes(x.sub)) out.subjects.push(x.sub); });
+  if(Array.isArray(d.ach) && d.ach.length<50 && d.ach.every(x => typeof x==='string')) out.ach = d.ach.slice();
+  return out;
+}
+/* Load + versioned migration. Legacy text is copied to BAK before anything is written; on any failure nothing is overwritten. */
+function loadState(){
+  let raw = null; try{ raw = localStorage.getItem(KEY); }catch(e){}
+  if(!raw){
+    /* One-time upgrade from the very first version (key 'studyTracker.v1'): keep a copy of the old text, then migrate */
+    let old = null; try{ old = ACC.id==='main' ? localStorage.getItem('studyTracker.v1') : null; }catch(e){}
+    if(old===null) return checkData({sessions:[]});
+    try{
+      const st0 = checkData(JSON.parse(old), true);
+      if(localStorage.getItem(KEY+'.backup-v1')===null) localStorage.setItem(KEY+'.backup-v1', old);
+      if(localStorage.getItem(KEY+'.backup-v1')===null) throw E('e.backupWrite');
+      st0.ach = null; return st0;
+    }catch(err){ LOCKED = true; LOCK_ERR = err; return checkData({sessions:[]}); }
+  }
+  try{
+    const d = JSON.parse(raw), st = checkData(d, true);
+    if(!(d.v===4 && Array.isArray(d.sessions))){                  // legacy -> v4
+      if(localStorage.getItem(BAK)===null) localStorage.setItem(BAK, raw);
+      if(localStorage.getItem(BAK)===null) throw E('e.backupWrite');
+      st.ach = null;
+    }
+    return st;
+  }catch(err){ LOCKED = true; LOCK_ERR = err; return checkData({sessions:[]}); }
+}
+/* Single entry point for adding / replacing a session (manual, edit, timer). Same id can never be stored twice. */
+function putSession(x){
+  if(!isDate(x.date) || x.date>today()) return tr('v.dateBad');
+  if(!isInt(x.min, x.src==='legacy'?0:1, 1440)) return tr('v.min1');
+  if(dayTotal(x.date,x.id)+x.min > 1440) return tr('v.day24');
+  const i = state.sessions.findIndex(z => z.id===x.id);
+  if(i>=0) state.sessions[i] = x; else state.sessions.push(x);
+  rebuild(); persist(); return '';
+}
+state = loadState(); rebuild();
+if(LOCKED) showBanner();
+else persist();                                                  // writes the migrated v4 structure
+
+
+/* ================= Font choice (display preference only; separate key) ================= */
+const FKEY = 'studyTracker.font', FONT_CSS = {
+  soft:'https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Noto+Sans+Bengali:wght@400;500;600;700&display=swap',
+  serif:'https://fonts.googleapis.com/css2?family=Noto+Serif+Bengali:wght@400;500;600;700&display=swap'};
+function applyFont(f){
+  if(!['classic','soft','serif','system'].includes(f)) f = 'classic';
+  document.documentElement.dataset.font = f; $('fontSel').value = f;
+  if(FONT_CSS[f] && !document.querySelector('link[data-font="'+f+'"]')){
+    const l = document.createElement('link'); l.rel='stylesheet'; l.href=FONT_CSS[f]; l.dataset.font=f; document.head.appendChild(l); }
+}
+try{ applyFont(localStorage.getItem(FKEY)||'classic'); }catch(e){ applyFont('classic'); }
+$('fontSel').onchange = e => { applyFont(e.target.value); try{ localStorage.setItem(FKEY, e.target.value); }catch(err){} };
+
+/* ================= Render ================= */
+/* ================= Theme system ================= */
+const THEME_LIST = [
+  ['light','Classic Light','ক্লাসিক লাইট'],['ocean','Ocean Blue','ওশান ব্লু'],['emerald','Emerald Green','এমারেল্ড গ্রিন'],
+  ['lavender','Lavender Purple','ল্যাভেন্ডার পার্পল'],['rose','Rose Pink','রোজ পিঙ্ক'],['sand','Warm Sand','ওয়ার্ম স্যান্ড'],
+  ['dark','Midnight Dark','মিডনাইট ডার্ক'],['amoled','AMOLED Black','অ্যামোলেড ব্ল্যাক'],['violet','Midnight Purple','মিডনাইট পার্পল'],
+  ['forest','Forest Dark','ফরেস্ট ডার্ক'],['slate','Slate Gray','স্লেট গ্রে'],['cyber','Cyber Blue','সাইবার ব্লু']];
+const DARK_THEMES = new Set(['dark','amoled','violet','forest','slate','cyber']);
+const THEME_PAIR = {light:'dark',dark:'light',ocean:'cyber',cyber:'ocean',emerald:'forest',forest:'emerald',lavender:'violet',violet:'lavender',sand:'slate',slate:'sand',rose:'amoled',amoled:'rose'};
+const THEME_IDS = THEME_LIST.map(t => t[0]).concat('system');
+const mqDark = window.matchMedia ? matchMedia('(prefers-color-scheme: dark)') : null;
+const normTheme = t => THEME_IDS.includes(t) ? t : 'dark';
+const resolveTheme = t => t === 'system' ? (mqDark && mqDark.matches ? 'dark' : 'light') : normTheme(t);
+const CHK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7"/></svg>';
+const PV = '<span class="tp-card"><i class="tp-t"></i><i class="tp-b"></i></span><i class="tp-pill"></i><i class="tp-dot"></i>';
+function initThemeUI(){
+  const mk = (id, prev) => { const l = document.createElement('label'); l.className = 'tcard'; l.dataset.t = id;
+    l.innerHTML = '<input type="radio" name="themeRad" value="'+id+'">'+prev+'<span class="tname"></span><span class="tchk" aria-hidden="true">'+CHK+'</span>'; return l; };
+  THEME_LIST.forEach(t => $(DARK_THEMES.has(t[0]) ? 'tgD' : 'tgL').appendChild(mk(t[0], '<span class="tprev" data-theme="'+t[0]+'" aria-hidden="true">'+PV+'</span>')));
+  $('tgA').appendChild(mk('system', '<span class="tprev tsys tsysw" aria-hidden="true"><span class="tprev" data-theme="light">'+PV+'</span><span class="tprev" data-theme="dark">'+PV+'</span></span>'));
+  $('themeSec').addEventListener('change', e => { if(e.target && e.target.name === 'themeRad') setTheme(e.target.value); });
+}
+function paintThemeUI(){
+  const b = bn(), cur = normTheme(state.settings.theme), res = resolveTheme(cur);
+  $('thLblL').textContent = b ? 'লাইট থিম' : 'Light Themes'; $('thLblD').textContent = b ? 'ডার্ক থিম' : 'Dark Themes'; $('thLblA').textContent = b ? 'স্বয়ংক্রিয়' : 'Automatic';
+  document.querySelectorAll('#themeSec .tcard').forEach(l => {
+    const id = l.dataset.t, row = THEME_LIST.find(t => t[0]===id), nm = l.querySelector('.tname');
+    if(row) nm.textContent = b ? row[2] : row[1];
+    else nm.innerHTML = '<span></span><small class="tsub"></small>';
+    if(!row){ nm.firstChild.textContent = b ? 'সিস্টেম ডিফল্ট' : 'System Default'; const r = THEME_LIST.find(t => t[0]===res);
+      nm.querySelector('.tsub').textContent = (b ? 'ডিভাইস অনুসরণ করে' : 'Follows device') + (r ? ' · ' + (b ? r[2] : r[1]) : ''); }
+    l.querySelector('input').checked = id === cur;
+  });
+}
+function applyTheme(){
+  state.settings.theme = normTheme(state.settings.theme);
+  const r = resolveTheme(state.settings.theme), de = document.documentElement;
+  de.dataset.theme = r; de.dataset.themePref = state.settings.theme;
+  const m = document.querySelector('meta[name="theme-color"]'); if(m){ const bg = getComputedStyle(de).getPropertyValue('--bg').trim(); if(bg) m.setAttribute('content', bg); }
+  if($('themeBtn')) $('themeBtn').innerHTML = DARK_THEMES.has(r) ? ICON_SUN : ICON_MOON;
+  paintThemeUI();
+}
+function setTheme(id){ state.settings.theme = normTheme(id); state.settings.themeSet = true; persist(); render(); }
+function themeColors(){ const cs = getComputedStyle(document.documentElement), g = n => cs.getPropertyValue(n).trim();
+  return {bg:g('--bg'), card:g('--card'), ink:g('--ink'), mute:g('--mute'), acc:g('--acc'), teal:g('--teal'), line:g('--line')}; }
+if(mqDark){ const f = () => { if(state.settings.theme === 'system') applyTheme(); }; mqDark.addEventListener ? mqDark.addEventListener('change', f) : mqDark.addListener(f); }
+
+const ICON_SUN = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>', ICON_MOON = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8 8 0 019.5 4a8 8 0 1010.5 10.5z"/></svg>';
+function renderBase(){
+  try{ renderProfile(); }catch(e){}
+  try{ if(localStorage.getItem('studyTracker.lang')!==state.settings.lang) localStorage.setItem('studyTracker.lang', state.settings.lang); if(localStorage.getItem('studyTracker.theme')!==state.settings.theme) localStorage.setItem('studyTracker.theme', state.settings.theme); }catch(e){}
+  applyTheme();
+  $('langSel').value = state.settings.lang;
+  if(document.activeElement !== $('tgtIn')) $('tgtIn').value = state.settings.targetMin/60;
+  paintHomeNote();
+
+  // Today card
+  const t = today(), tm = state.entries[t] || 0, tgt = state.settings.targetMin;
+  const td = new Date();
+  $('tLabel').textContent = tr('home.today');
+  $('tLabel2').textContent = tr('home.focusTitle');
+  $('tDate').textContent = `${td.getDate()} ${monthName(td.getMonth())} ${td.getFullYear()}`;
+  $('tTime').textContent = dur(tm);
+  const pct = tgt ? tm/tgt*100 : 0;
+  $('tProg').textContent = `${+(tm/60).toFixed(1)} / ${+(tgt/60).toFixed(1)} ${tr('unit.hours')}`;
+  $('tPct').textContent = pct.toFixed(1)+'%' + '';
+  $('tFill').style.width = Math.min(100,pct)+'%'; $('hRing').style.strokeDashoffset = (163.4*(1-Math.min(1,pct/100))).toFixed(1); $('tFill').parentNode.setAttribute('aria-valuenow', Math.round(Math.min(100,pct)));
+
+  renderHistory();
+  const keys = sortedKeys();
+
+  // Total & average (all days in history)
+  const vals = keys.map(k=>state.entries[k]), total = vals.reduce((a,b)=>a+b,0);
+  $('total').textContent = dur(total);
+  const sv = vals.filter(v=>v>0);
+  $('avg').textContent = sv.length ? dur(total/sv.length) : '—';
+  $('l1').textContent = tr('adv.totalStudy');
+  $('l2').textContent = tr('adv.avgStudy');
+
+  // Weekly: last 7 days including today
+  const days = []; for(let i=6;i>=0;i--){ const d=new Date(); d.setDate(d.getDate()-i); days.push(d); }
+  const wv = days.map(d=>state.entries[dkey(d)]||0), wmax = Math.max(tgt, ...wv, 1);
+  $('wTotal').textContent = dur(wv.reduce((a,b)=>a+b,0));
+  $('week').innerHTML = `<i class="tline" style="bottom:${20+tgt/wmax*88}px"></i>` + days.map((d,i)=>`<div class="col"><span class="v">${wv[i]>=tgt?'✓ ':''}${wv[i]?+(wv[i]/60).toFixed(1):''}</span>
+    <div class="b${wv[i]>=tgt?' hit':''}" style="height:${wv[i]/wmax*88}px;${wv[i]?'':'opacity:.25'}"></div>
+    <small>${(bn()?BN_DAYS:EN_DAYS)[d.getDay()]}</small></div>`).join('');
+
+  // Monthly: current month
+  const pre = today().slice(0,7), mk = keys.filter(k=>k.startsWith(pre));
+  const mv = mk.map(k=>state.entries[k]), mt = mv.reduce((a,b)=>a+b,0);
+  $('mTitle').textContent = `${tr('mon.heading')} (${monthName(td.getMonth())})`;
+  $('mTotal').textContent = dur(mt);
+  const mvs = mv.filter(v=>v>0);
+  $('mAvg').textContent = mvs.length ? dur(mt/mvs.length) : '—';
+  if(mv.length && Math.max(...mv)>0){
+    const best = mk.reduce((a,b)=>state.entries[b]>state.entries[a]?b:a);
+    $('mBest').textContent = `${short(best)} — ${hm(state.entries[best])}`;
+  } else $('mBest').textContent = '—';
+}
+
+const openD = {};                                     // which days are expanded in History (view state only, not saved)
+/* One main row per calendar date: total for the day, sessions listed under it (edit/delete unchanged). */
+function dayGroups(xs){
+  const tg = state.settings.targetMin, order = [], byDay = {};
+  xs.forEach(x => { if(!byDay[x.date]){ byDay[x.date] = []; order.push(x.date); } byDay[x.date].push(x); });
+  return order.map(d => {
+    const ss = byDay[d], total = state.entries[d] || 0, open = !!openD[d], n = ss.filter(x => x.min > 0).length;
+    const subs = [...new Set(ss.map(x => x.sub).filter(Boolean))].map(esc).join(', ');
+    const items = ss.map(x => {
+      const extra = [x.sub ? esc(x.sub) : '', x.note ? esc(x.note) : ''].filter(Boolean).join(' · ');
+      const src = x.src === 'timer' ? tr('hist.timer') : x.src === 'manual' ? tr('hist.manual') : '';
+      return `<div class="item${x.id === editId ? ' sel' : ''}${x.id === flashKey ? ' flash' : ''}"><div class="txt"><div>${hm(x.min)}</div><div class="small">${[src, extra].filter(Boolean).join(' · ')}</div></div><button type="button" class="icon" data-a="edit" data-id="${x.id}" aria-label="${tr('hist.edit')}">${ICO.edit}</button><button type="button" class="icon danger" data-a="del" data-id="${x.id}" aria-label="Delete session">${ICO.trash}</button></div>`;
+    }).join('');
+    return `<div class="dayrow${open ? ' open' : ''}"><button type="button" class="dayhd" data-a="dtog" data-d="${d}" aria-expanded="${open}"><span class="chev">▾</span><span class="dayt"><span><b>${short(d)}</b>${d === today() ? `<em class='badge'>${tr('hist.todayBadge')}</em>` : ''}${total >= tg ? `<em class='ok'>${tr('hist.goal')}</em>` : ''}</span><span class="small">${dur(total)} · ${tr(n === 1 ? 'sess.one' : 'sess.many', {n})}${subs ? ' · ' + subs : ''}</span></span></button><div class="daysess"${open ? '' : ' hidden'}>${items}</div></div>`;
+  });
+}
+function renderHistory(){
+  // History: one row per session; search + month/subject filter + sort; grouped by month
+  const keys = sortedKeys(), tg = state.settings.targetMin;
+    fillSel('fm', [...new Set(keys.map(k=>k.slice(0,7)))].map(m=>[m, `${monthName(+m.slice(5)-1)} ${m.slice(0,4)}`]), tr('hist.allMonths'));
+    fillSel('fs', state.subjects.map(x=>[x,x]), tr('sub.all'));
+  const q = $('fq').value.trim().toLowerCase(), fm = $('fm').value, fs = $('fs').value;
+  let ss = state.sessions.filter(x => (!fm||x.date.startsWith(fm)) && (!fs||x.sub===fs) && (!q||`${short(x.date)} ${x.sub} ${x.note}`.toLowerCase().includes(q)));
+  if($('fo').value==='desc') ss = ss.slice().reverse();
+  const cnt = {}; state.sessions.forEach(z => { if(z.min>0) cnt[z.date] = (cnt[z.date]||0)+1; });
+  const groups = {}; ss.forEach(x => { (groups[x.date.slice(0,7)] = groups[x.date.slice(0,7)] || []).push(x); });
+  $('hist').innerHTML = ss.length ? '' : `<div class='empty'>${keys.length?tr('hist.noMatch'):tr('hist.empty')}</div>`;
+  const gk = Object.keys(groups).sort(), latest = gk[gk.length-1], filtering = !!(q||fm||fs);
+  const isOpen = ym => filtering || (ym in openM ? openM[ym] : ym===latest);
+  Object.keys(groups).forEach(ym => {
+    const xs = groups[ym], sum = xs.reduce((a,x)=>a+x.min,0), d = parse(xs[0].date);
+    const box = document.createElement('div'); box.className = 'month' + (isOpen(ym)?'':' closed');
+    box.innerHTML = `<div class="mh"><button type="button" class="mtog" data-a="tog" data-ym="${ym}" aria-expanded="${isOpen(ym)}"><span class="chev">▾</span>
+        <span><b>${monthName(d.getMonth())} ${d.getFullYear()}</b>
+        <span class="small" style="display:block">${tr('hist.days',{n:new Set(xs.map(x=>x.date)).size})} · ${tr('hist.sess',{n:xs.filter(x=>x.min>0).length})} · ${dur(sum)}</span></span></button>
+        <button type="button" class="icon" data-a="img" data-ym="${ym}" aria-label="${tr('hist.imgAria')}">${ICO.cam}</button></div>` +
+      dayGroups(xs).join('');
+    $('hist').appendChild(box);
+  });
+  flashKey = null;
+}
+
+/* ================= Study calendar (month view) =================
+   Reads state.entries only: the same daily totals used by History, the heatmap and Insights. */
+let calY, calM, calSel = null;
+const CT = {en:{prev:'Previous month',next:'Next month',today:'Today',total:'Total study',avg:'Daily average',active:'Active days',goalDays:'Goal reached',best:'Best day',noRec:'No record for this day',zero:'Recorded 0, no study',diff:'vs daily target',met:'Goal reached',short:'Below goal',sub:'Subjects',none:'No study record for this day.'},
+  bn:{prev:'আগের মাস',next:'পরের মাস',today:'আজ',total:'মোট পড়াশোনা',avg:'দৈনিক গড়',active:'পড়ার দিন',goalDays:'লক্ষ্য পূরণ',best:'সেরা দিন',noRec:'এই দিনের কোনো রেকর্ড নেই',zero:'শূন্য রেকর্ড, পড়াশোনা হয়নি',diff:'দৈনিক লক্ষ্যের তুলনায়',met:'লক্ষ্য পূরণ',short:'লক্ষ্যের নিচে',sub:'বিষয়',none:'এই দিনের কোনো পড়াশোনার রেকর্ড নেই।'}};
+const ct = k => CT[bn() ? 'bn' : 'en'][k];
+function calMonthStats(){
+  const E = state.entries, tgt = state.settings.targetMin, t = today(), ym = `${calY}-${pad(calM+1)}`, days = new Date(calY, calM+1, 0).getDate();
+  let total = 0, active = 0, goal = 0, best = null, counted = 0;
+  for(let d = 1; d <= days; d++){
+    const k = `${ym}-${pad(d)}`; if(k > t) break;
+    counted++; const v = E[k] || 0; total += v;
+    if(v > 0){ active++; if(!best || v > best.min) best = {date:k, min:v}; }
+    if(tgt && v >= tgt) goal++;
+  }
+  return {total, active, goal, best, avg: counted ? Math.round(total / counted) : 0};
+}
+function calRender(){
+  if(calY === undefined){ const n = new Date(); calY = n.getFullYear(); calM = n.getMonth(); calSel = today(); }
+  const E = state.entries, tgt = state.settings.targetMin, t = today(), ym = `${calY}-${pad(calM+1)}`;
+  $('calTitle').textContent = `${monthName(calM)} ${calY}`; $('calToday').textContent = ct('today');
+  $('calPrev').setAttribute('aria-label', ct('prev')); $('calNext').setAttribute('aria-label', ct('next'));
+  $('calWd').innerHTML = (bn() ? BN_DAYS : EN_DAYS).map(d => `<span>${d}</span>`).join('');
+  const first = new Date(calY, calM, 1).getDay(), days = new Date(calY, calM+1, 0).getDate();
+  let h = ''; for(let i = 0; i < first; i++) h += '<span aria-hidden="true"></span>';
+  for(let d = 1; d <= days; d++){
+    const k = `${ym}-${pad(d)}`, has = k in E, v = E[k] || 0, hit = !!tgt && v >= tgt;
+    const lvl = v <= 0 ? 0 : !tgt ? 3 : v/tgt < .25 ? 1 : v/tgt < .6 ? 2 : hit ? 4 : 3;
+    const cls = ['cc', lvl ? 'cl' + lvl : '', has && v <= 0 ? 'zero' : '', k === t ? 'today' : '', k === calSel ? 'sel' : '', k > t ? 'fut' : ''].filter(Boolean).join(' ');
+    h += `<button type="button" class="${cls}" data-k="${k}" aria-pressed="${k === calSel}" aria-label="${short(k)}: ${has ? (v ? dur(v) : ct('zero')) : ct('noRec')}${hit ? ', ' + ct('met') : ''}" ${k > t ? 'disabled' : ''}><b>${d}</b>${v ? `<small>${hm(v)}</small>` : ''}${hit ? '<i class="cok" aria-hidden="true">✓</i>' : ''}</button>`;
+  }
+  $('calGrid').innerHTML = h;
+  const s = calMonthStats();
+  $('calSum').innerHTML = '<div class="tiles">' +
+    `<div class="tile"><span>${ct('total')}</span><b>${dur(s.total)}</b></div>` +
+    `<div class="tile"><span>${ct('avg')}</span><b>${dur(s.avg)}</b></div>` +
+    `<div class="tile"><span>${ct('active')}</span><b>${s.active}</b></div>` +
+    `<div class="tile"><span>${ct('goalDays')}</span><b>${s.goal}</b></div>` +
+    `<div class="tile" style="grid-column:1/-1"><span>${ct('best')}</span><b>${s.best ? short(s.best.date) + ' · ' + dur(s.best.min) : '—'}</b></div></div>`;
+  const v = E[calSel] || 0, has = calSel in E, ss = state.sessions.filter(x => x.date === calSel);
+  let info = `<b>${wd(calSel)}, ${short(calSel)} ${parse(calSel).getFullYear()}</b>`;
+  if(!has) info += `<div class="calnote">${ct('none')}</div>`;
+  else {
+    info += `<div>${dur(v)}` + (tgt ? ` · ${v >= tgt ? ct('met') : ct('short')} (${v >= tgt ? '+' : '−'}${dur(Math.abs(v - tgt))} ${ct('diff')})` : '') + '</div>';
+    const subs = [...new Set(ss.map(x => x.sub).filter(Boolean))];
+    if(subs.length) info += `<div class="small">${ct('sub')}: ${subs.map(esc).join(', ')}</div>`;
+    if(ss.length) info += `<ul>${ss.map(x => `<li>${hm(x.min)}${x.sub ? ' · ' + esc(x.sub) : ''}${x.note ? ' — ' + esc(x.note) : ''}</li>`).join('')}</ul>`;
+  }
+  $('calInfo').innerHTML = info;
+}
+function calGo(){ const g = $('calGrid'); g.classList.remove('calmove'); void g.offsetWidth; g.classList.add('calmove'); calRender(); }
+$('calGrid').onclick = e => { const b = e.target.closest('button.cc'); if(!b || b.disabled) return; calSel = b.dataset.k; calRender(); };
+$('calPrev').onclick = () => { if(calY === undefined) calRender(); const m = calM - 1; calY += m < 0 ? -1 : 0; calM = (m + 12) % 12; calGo(); };
+$('calNext').onclick = () => { if(calY === undefined) calRender(); const m = calM + 1; calY += m > 11 ? 1 : 0; calM = m % 12; calGo(); };
+$('calToday').onclick = () => { const n = new Date(); calY = n.getFullYear(); calM = n.getMonth(); calSel = today(); calGo(); };
+
+/* ================= Form: save / edit ================= */
+function showErr(msg){ $('err').textContent = msg; }
+let editId = null;                                     // id of the session being edited (null = adding a new one)
+function syncFormToDate(){
+  fillSubjects();
+  const ed = editId && state.sessions.find(x=>x.id===editId);
+  $('saveBtn').textContent = ed ? tr('form.update') : tr('form.save');
+  $('formTitle').textContent = ed ? `${short(ed.date)} — ${tr('form.editing')}` : tr('form.title');
+  $('cancelBtn').style.display = ed ? '' : 'none';
+}
+function resetForm(){
+  editId = null; $('dateIn').value = today(); $('hIn').value = ''; $('mIn').value = ''; $('noteIn').value = ''; $('newSub').value = ''; $('subIn').value = '';
+  showErr(''); syncFormToDate(); render();
+}
+$('saveBtn').onclick = () => {
+  if(locked()) return;
+  const k = $('dateIn').value, hs = $('hIn').value.trim(), ms = $('mIn').value.trim();
+  if(!k) return showErr(tr('v.date'));
+  if(k > today()) return showErr(tr('v.future'));
+  if(hs==='' && ms==='') return showErr(tr('v.emptyTime'));
+  const h = hs===''?0:Number(hs), m = ms===''?0:Number(ms);
+  if(!Number.isInteger(h) || h<0 || h>24) return showErr(tr('v.hours'));
+  if(!Number.isInteger(m) || m<0 || m>59) return showErr(tr('v.minutes'));
+  const typed = $('newSub').value.trim().slice(0,30), newSub = state.subjects.find(z=>z.toLowerCase()===typed.toLowerCase()) || typed, sub = newSub || $('subIn').value;
+  const old = editId && state.sessions.find(x=>x.id===editId);
+  // Manual entry = a NEW session (existing sessions are only changed via Edit)
+  const x = {id: old?old.id:uid(), date:k, min:h*60+m, sub, note:$('noteIn').value.trim().slice(0,140), src: old?old.src:'manual', start: old?old.start:null, end: old?old.end:null};
+  const err = putSession(x); if(err) return showErr(err);
+  if(newSub && !state.subjects.includes(newSub)){ state.subjects.push(newSub); persist(); }
+  flashKey = x.id; toast(old?tr('save.upd'):tr('save.new')); checkAch(true); resetForm();
+};
+$('cancelBtn').onclick = resetForm;
+$('dateIn').onchange = () => { showErr(''); render(); };
+
+/* History buttons (event delegation) */
+$('hist').onclick = async e => {
+  const b = e.target.closest('button'); if(!b) return;
+  if(b.dataset.a==='img') return saveImage(b.dataset.ym);
+  if(b.dataset.a==='dtog'){ openD[b.dataset.d] = !openD[b.dataset.d]; return renderHistory(); }
+  if(b.dataset.a==='tog'){ openM[b.dataset.ym] = b.closest('.month').classList.contains('closed'); return render(); }
+  const id = b.dataset.id, x = state.sessions.find(z=>z.id===id); if(!x) return;
+  if(b.dataset.a==='edit'){
+    go('home'); setAddTab('manual'); editId = id; $('dateIn').value = x.date; $('hIn').value = Math.floor(x.min/60); $('mIn').value = pad(x.min%60);
+    fillSubjects(); $('subIn').value = x.sub||''; $('noteIn').value = x.note||''; $('newSub').value = ''; $('opt').open = !!(x.sub||x.note);
+    syncFormToDate(); render(); $('hIn').focus(); window.scrollTo({top:$('dateIn').offsetTop-80, behavior:'smooth'});
+  } else if(b.dataset.a==='del'){
+    if(locked()) return;
+        if(await ask(tr('del.confirm',{date:short(x.date),dur:dur(x.min)}), tr('dlg.delete'))){
+      const removed = x; state.sessions = state.sessions.filter(z=>z.id!==id); rebuild(); persist(); checkAch(false); showUndo(removed);
+      if(editId===id) resetForm(); else render();
+    }
+  }
+};
+
+/* ================= Settings ================= */
+
+$('langSel').onchange = e => { state.settings.lang = e.target.value; persist(); applyStatic(); render(); syncFormToDate(); syncPrefs(); tShow(); };
+$('tgtIn').onchange = e => {
+  const v = Number(e.target.value);
+  if(!(v>=1 && v<=24)){ $('setErr').textContent=tr('set.targetErr'); e.target.value = state.settings.targetMin/60; return; }
+  $('setErr').textContent=''; state.settings.targetMin = Math.round(v*60); persist(); render();
+};
+
+/* ================= Save history as picture (PNG) ================= */
+// Whole-year picture (History button): all 12 months of one year as calendar grids, in one PNG.
+// Year = the current year; if it has no records yet, the latest year that has records.
+async function saveYearImage(){
+  const E = state.entries, tgt = state.settings.targetMin, lang = langNow(), C = themeColors(), t = today();
+  const recorded = Object.keys(E).filter(k => E[k] > 0);
+  if(!recorded.length) return toast(tr('v.noImg'));
+  let Y = new Date().getFullYear();
+  if(!recorded.some(k => +k.slice(0,4) === Y)) Y = Math.max(...recorded.map(k => +k.slice(0,4)));
+  const yk = recorded.filter(k => +k.slice(0,4) === Y);
+  try{ await document.fonts.ready; }catch(e){}
+  const fam = (getComputedStyle(document.documentElement).getPropertyValue('--font')||'').trim() || 'system-ui,sans-serif';
+  const S = 2.5, W = 1000, P = 40, G = 18, COLS = 3, ROWS = 4, IN = 16;
+  const cardW = (W - 2*P - (COLS-1)*G) / COLS, cellW = (cardW - 2*IN) / 7, cellH = 40, pitch = 44;
+  const cardH = IN + 58 + 5*pitch + cellH + IN;   // room for six week rows (date + hours in each cell), so every month card has the same height
+  const GY = P + 170, footY = GY + ROWS*cardH + (ROWS-1)*G + 34, H = footY + P;
+  const cv = document.createElement('canvas'); cv.width = Math.round(W*S); cv.height = Math.round(H*S);
+  const x = cv.getContext('2d'); x.scale(S, S); x.textBaseline = 'middle';
+  const txt = (s,px,py,size,color,w,al) => { x.font = `${w||400} ${size}px ${fam}`; x.fillStyle = color; x.textAlign = al||'left'; x.fillText(s,px,py); };
+  const fit = (s,w,size,wt) => { x.font = `${wt||400} ${size}px ${fam}`; if(x.measureText(s).width<=w) return s; const a = Array.from(s); while(a.length>1 && x.measureText(a.join('')+'…').width>w) a.pop(); return a.join('')+'…'; };
+
+  // one entry per month of the year: number of days, total minutes
+  const months = Array.from({length:12}, (_,m) => {
+    const dim = new Date(Y, m+1, 0).getDate(); let total = 0;
+    for(let d = 1; d <= dim; d++) total += E[`${Y}-${pad(m+1)}-${pad(d)}`] || 0;
+    return {m, dim, lead: new Date(Y, m, 1).getDay(), total};
+  });
+  const total = yk.reduce((a,k) => a + E[k], 0), goal = tgt ? yk.filter(k => E[k] >= tgt).length : 0;
+  const best = months.reduce((a,b) => b.total > a.total ? b : a, months[0]);
+
+  x.fillStyle = C.bg; x.fillRect(0,0,W,H);
+
+  // header: profile photo (or initials), name, and the year on the right
+  const AR = 30, ax = P+AR, ay = P+AR, tx = P+2*AR+16, av = await loadImg(prof.pic), nm = (profName || prof.name || '').trim();
+  x.save(); x.beginPath(); x.arc(ax, ay, AR, 0, Math.PI*2); x.closePath(); x.clip();
+  if(av){ const mm = Math.min(av.width, av.height); x.drawImage(av, (av.width-mm)/2, (av.height-mm)/2, mm, mm, ax-AR, ay-AR, 2*AR, 2*AR); }
+  else { x.fillStyle = C.acc; x.fillRect(ax-AR, ay-AR, 2*AR, 2*AR); txt(initials(nm) || '?', ax, ay+1, 22, C.card, 700, 'center'); }
+  x.restore();
+  const hw = W - P - tx - 130;
+  if(nm){ txt(fit(nm, hw, 26, 700), tx, P+AR-9, 26, C.ink, 700); txt(fit(tr('yr.sub'), hw, 16), tx, P+AR+15, 16, C.mute); }
+  else txt(fit(tr('yr.sub'), hw, 18), tx, P+AR, 18, C.mute);
+  txt(String(Y), W-P, P+AR, 46, C.acc, 700, 'right');
+
+  // year summary row
+  const SW = (W - 2*P) / 4;
+  const stats = [[tr('yr.total'), dur(total)], [tr('yr.days'), String(yk.length)], [tr('yr.goal'), String(goal)], [tr('yr.best'), best.total ? `${monthName(best.m)} · ${hm(best.total)}` : '—']];
+  stats.forEach((c,i) => { const sx = P + i*SW, mw = SW - 14; txt(fit(c[0], mw, 14), sx, P+98, 14, C.mute); txt(fit(c[1], mw, 22, 700), sx, P+124, 22, C.ink, 700); });
+  x.fillStyle = C.line; x.fillRect(P, P+148, W-2*P, 1.5);
+
+  // twelve month cards, 3 per row: the same calendar grid as the monthly picture
+  const wd = new Intl.DateTimeFormat(lang==='bn' ? 'bn-BD' : 'en-US', {weekday:'short'});
+  const wdNames = Array.from({length:7}, (_,i) => wd.format(new Date(2023,0,1+i)));
+  months.forEach(md => {
+    const col = md.m % COLS, row = Math.floor(md.m / COLS), cx = P + col*(cardW+G), cy = GY + row*(cardH+G);
+    x.fillStyle = C.card; x.beginPath(); x.roundRect(cx, cy, cardW, cardH, 16); x.fill();
+    x.strokeStyle = C.line; x.lineWidth = 1; x.beginPath(); x.roundRect(cx+.5, cy+.5, cardW-1, cardH-1, 16); x.stroke();
+    txt(monthName(md.m), cx+IN, cy+IN+12, 21, C.acc, 700);
+    if(md.total) txt(hm(md.total), cx+cardW-IN, cy+IN+12, 13, C.mute, 400, 'right');
+    wdNames.forEach((n,i) => txt(fit(n, cellW, 11, 600), cx+IN+i*cellW+cellW/2, cy+IN+44, 11, C.mute, 600, 'center'));
+    for(let d = 1; d <= md.dim; d++){
+      const k = `${Y}-${pad(md.m+1)}-${pad(d)}`, v = E[k] || 0, r = tgt ? v/tgt : 0, idx = md.lead + d - 1;
+      const px = cx+IN+(idx%7)*cellW + 1, py = cy+IN+58+Math.floor(idx/7)*pitch, w = cellW - 2;
+      if(v > 0){ x.globalAlpha = r >= 1 ? .3 : .12+.2*Math.min(r,1); x.fillStyle = r >= 1 ? C.teal : C.acc; x.beginPath(); x.roundRect(px, py, w, cellH, 8); x.fill(); x.globalAlpha = 1; }
+      if(k === t){ x.strokeStyle = C.acc; x.lineWidth = 1.5; x.beginPath(); x.roundRect(px+.75, py+.75, w-1.5, cellH-1.5, 8); x.stroke(); }
+      const dc = k > t ? C.mute : C.ink;
+      if(v > 0){ txt(String(d), px + w/2, py + 12, 13, dc, 700, 'center'); txt(fit(hm(v), w - 4, 11, 600), px + w/2, py + cellH - 11, 11, dc, 600, 'center'); }
+      else txt(String(d), px + w/2, py + cellH/2, 13, dc, 400, 'center');
+    }
+  });
+
+  // legend and footer
+  x.fillStyle = C.teal; x.globalAlpha = .6; x.beginPath(); x.roundRect(P, footY-6, 12, 12, 3); x.fill(); x.globalAlpha = 1;
+  txt(tr('yr.goal'), P+20, footY, 13, C.mute);
+  x.fillStyle = C.acc; x.globalAlpha = .45; x.beginPath(); x.roundRect(P+150, footY-6, 12, 12, 3); x.fill(); x.globalAlpha = 1;
+  txt(tr('yr.legStudy'), P+170, footY, 13, C.mute);
+  txt(tr('img.footer'), W-P, footY, 13, C.mute, 400, 'right');
+
+  cv.toBlob(blob => {
+    if(!blob) return toast(tr('v.noImg'));
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `study-year-${Y}.png`;
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }, 'image/png');
+}
+Object.assign(I18N.en,{'imp.tooBig':'This backup needs about {kb} KB of browser storage, and this browser has no room for that much data for this app. Nothing was changed; your current data is intact.','hist.img':'Save year as image','yr.sub':'Yearly study calendar','yr.total':'Total study','yr.days':'Active days','yr.goal':'Target reached','yr.best':'Best month','yr.legStudy':'Studied'});
+Object.assign(I18N.bn,{'imp.tooBig':'এই ব্যাকআপের জন্য প্রায় {kb} KB ব্রাউজার স্টোরেজ লাগবে, আর এই ব্রাউজারে এই অ্যাপের জন্য এত জায়গা নেই। কিছু বদলানো হয়নি; আপনার বর্তমান ডেটা ঠিক আছে।','hist.img':'পুরো বছর ছবি হিসেবে সেভ','yr.sub':'বার্ষিক পড়াশোনার ক্যালেন্ডার','yr.total':'মোট পড়াশোনা','yr.days':'পড়ার দিন','yr.goal':'লক্ষ্য পূরণ','yr.best':'সেরা মাস','yr.legStudy':'পড়া হয়েছে'});
+function saveImage(ym){ return ym ? saveMonthImage(ym) : saveYearImage(); }
+/* Compact monthly report: every day of the month in a calendar grid, drawn at 3x for sharp text. */
+function loadImg(src){ return new Promise(res => { if(!src) return res(null); const im = new Image(); im.onload = () => res(im); im.onerror = () => res(null); im.src = src; }); }
+async function saveMonthImage(ym){
+  const [Y,M] = ym.split('-').map(Number), dim = new Date(Y,M,0).getDate();
+  const keys = Object.keys(state.entries).filter(k => k.startsWith(ym) && state.entries[k]>0);
+  if(!keys.length) return toast(tr('v.noImg'));
+  try{ await document.fonts.ready; }catch(e){}
+  const tgt = state.settings.targetMin, lang = langNow(), C = themeColors();
+  const fam = (getComputedStyle(document.documentElement).getPropertyValue('--font')||'').trim() || 'system-ui,sans-serif';
+  const S = 3, W = 900, P = 28, G = 6, cw = (W-2*P-6*G)/7, ch = 88, lead = new Date(Y,M-1,1).getDay(), rows = Math.ceil((lead+dim)/7);
+  const GY = P+178, H = GY + rows*ch + (rows-1)*G + P + 14;
+  const cv = document.createElement('canvas'); cv.width = W*S; cv.height = H*S;
+  const x = cv.getContext('2d'); x.scale(S,S); x.textBaseline = 'middle';
+  const txt = (t,px,py,size,color,w,al) => { x.font = `${w||400} ${size}px ${fam}`; x.fillStyle = color; x.textAlign = al||'left'; x.fillText(t,px,py); };
+  const fit = (t,w,size,wt) => { x.font = `${wt||400} ${size}px ${fam}`; if(x.measureText(t).width<=w) return t; const a = Array.from(t); while(a.length>1 && x.measureText(a.join('')+'…').width>w) a.pop(); return a.join('')+'…'; };
+  x.fillStyle = C.bg; x.fillRect(0,0,W,H);
+  const total = keys.reduce((a,k)=>a+state.entries[k],0), best = keys.reduce((a,k)=>state.entries[k]>state.entries[a]?k:a, keys[0]);
+  const hit = keys.filter(k=>state.entries[k]>=tgt).length;
+  const av = await loadImg(prof.pic), nm = (profName || prof.name || '').trim();
+  const AR = 30, ax = P+AR, ay = P+AR, tx = P+2*AR+16;
+  x.save(); x.beginPath(); x.arc(ax, ay, AR, 0, Math.PI*2); x.closePath(); x.clip();
+  if(av){ const m = Math.min(av.width, av.height); x.drawImage(av, (av.width-m)/2, (av.height-m)/2, m, m, ax-AR, ay-AR, 2*AR, 2*AR); }
+  else { x.fillStyle = C.acc; x.fillRect(ax-AR, ay-AR, 2*AR, 2*AR); txt(initials(nm) || '?', ax, ay+1, 22, C.card, 700, 'center'); }
+  x.restore();
+  if(nm) txt(fit(nm, W-P-tx, 26, 700), tx, P+AR-9, 26, C.ink, 700);
+  txt(fit(`${monthName(M-1)} ${Y} · ${tr('mon.heading')}`, W-P-tx, 16), tx, P+AR+15, 16, C.mute);
+  [[tr('mon.total'),dur(total)],[tr('mon.active'),String(keys.length)],[tr('mon.best'),`${short(best)} · ${hm(state.entries[best])}`],[tr('mon.reach'),`${hit}`]].forEach((c,i)=>{
+    const cx = P + i*(W-2*P)/4, mw = (W-2*P)/4-12; txt(fit(c[0],mw,14),cx,P+90,14,C.mute); txt(fit(c[1],mw,22,700),cx,P+116,22,C.ink,700); });
+  x.fillStyle = C.line; x.fillRect(P, P+136, W-2*P, 1.5);
+  const wd = new Intl.DateTimeFormat(lang==='bn'?'bn-BD':'en-US',{weekday:'short'});
+  for(let i=0;i<7;i++) txt(wd.format(new Date(2023,0,1+i)), P+i*(cw+G)+cw/2, GY-14, 14, C.mute, 600, 'center');
+  for(let d=1; d<=dim; d++){
+    const k = `${ym}-${pad(d)}`, v = state.entries[k]||0, idx = lead+d-1, px = P+(idx%7)*(cw+G), py = GY+Math.floor(idx/7)*(ch+G), r = tgt ? v/tgt : 0;
+    x.fillStyle = C.card; x.beginPath(); x.roundRect(px,py,cw,ch,8); x.fill();
+    if(v>0){ x.globalAlpha = r>=1 ? .22 : .08+.16*Math.min(r,1); x.fillStyle = r>=1 ? C.teal : C.acc; x.beginPath(); x.roundRect(px,py,cw,ch,8); x.fill(); x.globalAlpha = 1; }
+    x.strokeStyle = C.line; x.lineWidth = 1; x.beginPath(); x.roundRect(px+.5,py+.5,cw-1,ch-1,8); x.stroke();
+    txt(String(d), px+8, py+14, 13, v>0?C.ink:C.mute, v>0?600:400);
+    if(v>0){
+      txt(hm(v), px+cw/2, py+46, 22, C.ink, 700, 'center');
+      const subs = [...new Set(state.sessions.filter(z=>z.date===k&&z.sub).map(z=>z.sub))];
+      if(subs.length) txt(fit(subs[0]+(subs.length>1?` +${subs.length-1}`:''), cw-12, 12), px+cw/2, py+72, 12, C.mute, 400, 'center');
+    }
+  }
+  x.fillStyle = C.teal; x.globalAlpha = .5; x.fillRect(P, H-P/2-14+4, 10, 10); x.globalAlpha = 1;
+  txt(`${tr('mon.reach')} · h:mm`, P+16, H-P/2-5+4, 12, C.mute);
+  txt('Study Time Tracker', W-P, H-P/2-5+4, 12, C.mute, 400, 'right');
+  cv.toBlob(blob => {
+    if(!blob) return toast(tr('v.noImg'));
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `study-report-${ym}.png`;
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  }, 'image/png');
+}
+$('imgAll').onclick = () => saveImage(null);
+
+/* ================= Export / Import / Reset / Recovery / Undo =================
+   Before any destructive change the current data is copied to ONE recovery slot in this browser (KEY+'.recovery').
+   Nothing is uploaded: this app has no cloud backup. */
+const RKEY = KEY + '.recovery';
+function readRecovery(){ try{ const r = JSON.parse(localStorage.getItem(RKEY)||'null'); return (r && typeof r.at==='string' && r.data && typeof r.data==='object') ? r : null; }catch(e){ return null; } }
+function saveRecovery(reason){ try{ localStorage.setItem(RKEY, JSON.stringify({at:new Date().toISOString(), reason, data:Object.assign(snap(), {plan:PL, profile:profGet(), extras:extrasGet()})})); return true; }catch(e){ return false; } }
+function fmtWhen(iso){ const d = new Date(iso); return `${d.getDate()} ${monthName(d.getMonth())} ${d.getFullYear()}, ${pad(d.getHours())}:${pad(d.getMinutes())}`; }
+function refreshRecovery(){
+  const r = readRecovery(); $('restoreBtn').hidden = !r;
+  $('recInfo').textContent = r ? tr('set.recInfo',{when:fmtWhen(r.at), reason:tr('reason.'+r.reason)}) : tr('set.recNone');
+}
+function showBanner(){ const b = $('banner'); b.hidden = !LOCKED; if(!LOCKED) return; const hasBak = localStorage.getItem(BAK)!==null;
+  b.textContent = tr('banner.lock',{reason:errText(LOCK_ERR)}) + (hasBak ? tr('banner.backup',{key:BAK}) : ''); }
+/* Switches every static label and attribute to the selected language (no full reload needed) */
+Object.assign(I18N.en, {"pw.openTitle": "Set a login password", "pw.openSub": "Also log in with your Gmail and a password.", "pw.title": "Set a login password", "pw.info": "Use this password with the same Gmail address. Your Google password is never asked for or stored.", "pw.newLbl": "New password", "pw.confLbl": "Confirm password", "pw.show": "Show", "pw.hide": "Hide", "pw.cancel": "Cancel", "pw.save": "Save password", "pw.s1": "Weak", "pw.s2": "Fair", "pw.s3": "Good", "pw.s4": "Strong", "pw.rule": "Use at least 6 characters, with a letter and a number.", "pw.mismatch": "The two passwords do not match.", "pw.noUser": "You can set a password only while signed in with Google.", "pw.inUse": "This Gmail address already has a password.", "pw.recent": "For security, log out, log in with Google again, and then retry.", "pw.many": "Too many attempts. Wait a few minutes and try again.", "pw.net": "Could not reach the server. Check your internet connection and try again.", "pw.done": "Password saved. You can now log in with this Gmail address and password."});
+Object.assign(I18N.bn, {"pw.openTitle": "লগইন পাসওয়ার্ড সেট করুন", "pw.openSub": "Gmail ও একটি পাসওয়ার্ড দিয়েও লগইন করুন।", "pw.title": "লগইন পাসওয়ার্ড সেট করুন", "pw.info": "এই পাসওয়ার্ড একই Gmail ঠিকানার সঙ্গে ব্যবহার হবে। আপনার Google পাসওয়ার্ড চাওয়া বা সংরক্ষণ করা হয় না।", "pw.newLbl": "নতুন পাসওয়ার্ড", "pw.confLbl": "পাসওয়ার্ড নিশ্চিত করুন", "pw.show": "দেখান", "pw.hide": "লুকান", "pw.cancel": "বাতিল", "pw.save": "পাসওয়ার্ড সেভ করুন", "pw.s1": "দুর্বল", "pw.s2": "মোটামুটি", "pw.s3": "ভালো", "pw.s4": "শক্তিশালী", "pw.rule": "কমপক্ষে ৬টি অক্ষর, সঙ্গে একটি অক্ষর ও একটি সংখ্যা থাকতে হবে।", "pw.mismatch": "দুটি পাসওয়ার্ড মিলছে না।", "pw.noUser": "Google দিয়ে login করা থাকলেই পাসওয়ার্ড সেট করা যাবে।", "pw.inUse": "এই Gmail ঠিকানায় আগে থেকেই একটি পাসওয়ার্ড যুক্ত আছে।", "pw.recent": "নিরাপত্তার জন্য লগআউট করে আবার Google দিয়ে login করে চেষ্টা করুন।", "pw.many": "অনেকবার চেষ্টা হয়েছে। কিছুক্ষণ পরে আবার চেষ্টা করুন।", "pw.net": "সার্ভারে পৌঁছানো যায়নি। ইন্টারনেট সংযোগ দেখে আবার চেষ্টা করুন।", "pw.done": "পাসওয়ার্ড সেভ হয়েছে। এখন থেকে এই Gmail ও পাসওয়ার্ড দিয়ে login করা যাবে।"});
+Object.assign(I18N.en, {"sync.paused": "Cloud sync is paused. You are seeing this device's copy, and changes stay on this device until sync is back.", "sync.retry": "Retry sync"});
+Object.assign(I18N.bn, {"sync.paused": "ক্লাউড sync বিরতিতে আছে। এই ডিভাইসের কপি দেখানো হচ্ছে; sync ফিরলে পরিবর্তন ক্লাউডে যাবে।", "sync.retry": "আবার sync করুন"});
+if(window.__SYNC_PAUSED){ $('syncBanner').hidden = false; $('syncBannerTxt').textContent = tr('sync.paused'); $('syncRetry').textContent = tr('sync.retry');
+  $('syncRetry').onclick = () => { try{ sessionStorage.removeItem('studyTracker.syncPaused'); }catch(e){} location.reload(); }; }
+Object.assign(I18N.en, {"set.permNone": "Allow notifications so reminders reach your phone's notification bar. Tap the button below.", "set.permGranted": "Notifications are allowed on this device. Reminders show in the notification bar while the app is open. When the app is closed, reminders are not sent; they stay in the Notification Center.", "set.permDenied": "Notifications are blocked. Android Chrome: tap the menu (⋮) > Settings > Site settings > Notifications, then allow this site. Installed app: phone Settings > Apps > Study Tracker > Notifications.", "set.remNote": "Reminders are checked only while this app is open, so a closed app cannot show them. Each reminder is also kept in the Notification Center.", "set.testBtn": "Send a test notification", "set.testBody": "Notifications work on this device.", "set.testOk": "Test notification sent.", "set.testFail": "This device could not show a notification. Check the settings above.", "set.osErr": "Notification problem on this device: {e}", "nf.planEndT": "Study session ended: {n}", "nf.planEndM": "Time to log how it went."});
+Object.assign(I18N.bn, {"set.permNone": "রিমাইন্ডার ফোনের Notification Bar-এ পৌঁছাতে নোটিফিকেশনের অনুমতি দিন। নিচের বোতামে ট্যাপ করুন।", "set.permGranted": "এই ডিভাইসে নোটিফিকেশন অনুমোদিত। অ্যাপ খোলা থাকলে রিমাইন্ডার Notification Bar-এ দেখাবে। অ্যাপ বন্ধ থাকলে রিমাইন্ডার পাঠানো হয় না; সেগুলো Notification Center-এ জমা থাকে।", "set.permDenied": "নোটিফিকেশন বন্ধ আছে। Android Chrome: মেনু (⋮) > Settings > Site settings > Notifications থেকে এই সাইট চালু করুন। Installed app: ফোনের Settings > Apps > Study Tracker > Notifications।", "set.remNote": "রিমাইন্ডার শুধু অ্যাপ খোলা থাকলে যাচাই হয়; বন্ধ অ্যাপ সেগুলো দেখাতে পারে না। প্রতিটি রিমাইন্ডার Notification Center-এও জমা থাকে।", "set.testBtn": "একটি টেস্ট নোটিফিকেশন পাঠান", "set.testBody": "এই ডিভাইসে নোটিফিকেশন কাজ করছে।", "set.testOk": "টেস্ট নোটিফিকেশন পাঠানো হয়েছে।", "set.testFail": "এই ডিভাইস নোটিফিকেশন দেখাতে পারেনি। উপরের সেটিং দেখুন।", "set.osErr": "এই ডিভাইসে নোটিফিকেশন সমস্যা: {e}", "nf.planEndT": "পড়ার সেশন শেষ: {n}", "nf.planEndM": "কেমন হলো তা লিখে রাখুন।"});
+Object.assign(I18N.en, {"nav.revision": "Revision", "nf.k.revision": "Revision", "nf.revTodayT": "Revision due: {n}", "nf.revTodayM": "Time to revise this topic.", "nf.revOverT": "Overdue revision: {n}", "nf.revOverM": "Revise it as soon as you can.", "set.remRev": "Revision reminders", "set.remRevD": "Get a reminder when a revision is due.", "rev.title": "Revision", "rev.desc": "Topics you studied come back at spaced intervals.", "rev.addLbl": "Topic you just studied", "rev.add": "Add to revision", "rev.subj": "Subject (optional)", "rev.today": "Today", "rev.overdue": "Overdue", "rev.upcoming": "Next 7 days", "rev.done": "Done", "rev.none": "Nothing to revise here", "rev.noneD": "Add a topic after you study it, and it comes back on schedule.", "rev.count": "Revision {c} of {t}", "rev.nextOn": "Next: {d}", "rev.completed": "All revisions completed", "rev.doneBtn": "Mark revised", "rev.diffLbl": "Difficulty", "rev.diff.easy": "Easy", "rev.diff.med": "Medium", "rev.diff.hard": "Hard", "rev.conf": "Confidence", "rev.schedLbl": "Schedule (days between revisions)", "rev.schedSave": "Save schedule", "rev.schedErr": "Enter 1 to 10 numbers from 1 to 365, separated by commas.", "rev.added": "Added to revision.", "rev.titleErr": "Enter the topic name.", "rev.delConfirm": "Delete this revision topic?"});
+Object.assign(I18N.bn, {"nav.revision": "রিভিশন", "nf.k.revision": "রিভিশন", "nf.revTodayT": "রিভিশন আজ: {n}", "nf.revTodayM": "এই টপিকটি রিভিশন করার সময়।", "nf.revOverT": "রিভিশনের সময় পেরিয়েছে: {n}", "nf.revOverM": "যত দ্রুত সম্ভব রিভিশন করুন।", "set.remRev": "রিভিশন রিমাইন্ডার", "set.remRevD": "রিভিশনের সময় এলে রিমাইন্ডার পাবেন।", "rev.title": "রিভিশন", "rev.desc": "যে টপিকগুলো পড়েছেন, সেগুলো নির্দিষ্ট ব্যবধানে ফিরে আসে।", "rev.addLbl": "যে টপিকটি এইমাত্র পড়লেন", "rev.add": "রিভিশনে যোগ করুন", "rev.subj": "বিষয় (ঐচ্ছিক)", "rev.today": "আজ", "rev.overdue": "সময় পেরিয়েছে", "rev.upcoming": "পরবর্তী ৭ দিন", "rev.done": "সম্পন্ন", "rev.none": "এখানে কোনো রিভিশন নেই", "rev.noneD": "পড়ার পর টপিক যোগ করুন; নির্ধারিত সময়ে আবার আসবে।", "rev.count": "রিভিশন {c}/{t}", "rev.nextOn": "পরবর্তী: {d}", "rev.completed": "সব রিভিশন সম্পন্ন", "rev.doneBtn": "রিভিশন সম্পন্ন", "rev.diffLbl": "কঠিনতা", "rev.diff.easy": "সহজ", "rev.diff.med": "মাঝারি", "rev.diff.hard": "কঠিন", "rev.conf": "আত্মবিশ্বাস", "rev.schedLbl": "সময়সূচি (রিভিশনের মাঝের দিন)", "rev.schedSave": "সময়সূচি সেভ করুন", "rev.schedErr": "১ থেকে ৩৬৫-এর মধ্যে ১০টি পর্যন্ত সংখ্যা লিখুন, কমা দিয়ে আলাদা করে।", "rev.added": "রিভিশনে যোগ হয়েছে।", "rev.titleErr": "টপিকের নাম লিখুন।", "rev.delConfirm": "এই রিভিশন টপিকটি মুছবেন?"});
+Object.assign(I18N.en, {"nf.k.study": "Study time", "nf.studyT": "Time to study", "nf.studyM": "You have not studied yet today. Start a focus session.", "set.studyRemT": "Study reminder time (empty = off)"});
+Object.assign(I18N.bn, {"nf.k.study": "পড়ার সময়", "nf.studyT": "পড়ার সময় হয়েছে", "nf.studyM": "আজ এখনো পড়া শুরু হয়নি। একটি ফোকাস সেশন শুরু করুন।", "set.studyRemT": "পড়ার রিমাইন্ডার সময় (খালি = বন্ধ)"});
+Object.assign(I18N.en, {"nav.habits": "Habits", "nf.k.habit": "Habit", "nf.habitT": "Habit: {n}", "nf.habitM": "Not ticked yet today.", "hab.title": "Habits", "hab.desc": "Build a habit by ticking it off each day.", "hab.addLbl": "New habit (e.g. Daily study, Reading)", "hab.add": "Add habit", "hab.none": "No habits yet", "hab.noneD": "Add a habit you want to keep every day.", "hab.undo": "Undo today", "hab.mark": "Mark today", "hab.cal": "Calendar", "hab.remTime": "Reminder time (empty = off)", "hab.streak": "{n} day streak", "hab.week": "This week {p}%", "hab.month": "This month {p}%", "hab.prevM": "Previous month", "hab.nextM": "Next month", "hab.history": "Recent history", "hab.histNone": "No completed days yet.", "hab.longest": "Longest streak: {n} days", "hab.delConfirm": "Delete this habit and its history?", "hab.nameErr": "Enter a habit name.", "hab.added": "Habit added."});
+Object.assign(I18N.bn, {"nav.habits": "অভ্যাস", "nf.k.habit": "অভ্যাস", "nf.habitT": "অভ্যাস: {n}", "nf.habitM": "আজ এখনো টিক দেওয়া হয়নি।", "hab.title": "অভ্যাস", "hab.desc": "প্রতিদিন টিক দিয়ে অভ্যাস গড়ুন।", "hab.addLbl": "নতুন অভ্যাস (যেমন: প্রতিদিন পড়া, বই পড়া)", "hab.add": "অভ্যাস যোগ করুন", "hab.none": "এখনো কোনো অভ্যাস নেই", "hab.noneD": "যে অভ্যাসটি প্রতিদিন রাখতে চান, তা যোগ করুন।", "hab.undo": "আজকের টিক তুলুন", "hab.mark": "আজ টিক দিন", "hab.cal": "ক্যালেন্ডার", "hab.remTime": "রিমাইন্ডার সময় (খালি = বন্ধ)", "hab.streak": "{n} দিনের ধারাবাহিকতা", "hab.week": "এই সপ্তাহ {p}%", "hab.month": "এই মাস {p}%", "hab.prevM": "আগের মাস", "hab.nextM": "পরের মাস", "hab.history": "সাম্প্রতিক ইতিহাস", "hab.histNone": "এখনো কোনো সম্পন্ন দিন নেই।", "hab.longest": "সবচেয়ে বেশি ধারাবাহিক: {n} দিন", "hab.delConfirm": "এই অভ্যাস ও এর ইতিহাস মুছবেন?", "hab.nameErr": "অভ্যাসের নাম লিখুন।", "hab.added": "অভ্যাস যোগ হয়েছে।"});
+Object.assign(I18N.en, {"nav.journal": "Study Journal", "jr.title": "Study Journal", "jr.desc": "A short note each day about what you studied.", "jr.date": "Date", "jr.read": "What did I study today?", "jr.mins": "How long did I study? (minutes)", "jr.tracked": "Tracked in the app: {n} min", "jr.minShort": "min", "jr.learned": "What did I learn?", "jr.hard": "What felt difficult?", "jr.mistakes": "Where did I make mistakes?", "jr.tomorrow": "What will I study tomorrow?", "jr.prod": "How productive was today?", "jr.prodNone": "Not rated", "jr.prodLbl": "{n} of 5", "jr.save": "Save entry", "jr.delete": "Delete entry", "jr.delConfirm": "Delete this journal entry?", "jr.edit": "Edit", "jr.empty": "Write something, add minutes, or rate the day first.", "jr.minsErr": "Minutes must be a whole number from 0 to 1440.", "jr.dateErr": "Pick a date that is today or earlier.", "jr.saved": "Journal saved.", "jr.tabDaily": "Daily", "jr.tabWeekly": "Weekly", "jr.tabMonthly": "Monthly", "jr.history": "History", "jr.none": "No entries yet.", "jr.noneD": "Your daily notes will appear here.", "jr.weekRange": "Week of {d}", "jr.sumLine": "{c} entries · {m} min studied · productivity {p}/5"});
+Object.assign(I18N.bn, {"nav.journal": "পড়ার জার্নাল", "jr.title": "পড়ার জার্নাল", "jr.desc": "প্রতিদিন কী পড়লেন, তার একটি সংক্ষিপ্ত লেখা।", "jr.date": "তারিখ", "jr.read": "আজ কী পড়লাম?", "jr.mins": "কতক্ষণ পড়লাম? (মিনিট)", "jr.tracked": "অ্যাপে ট্র্যাক করা: {n} মিনিট", "jr.minShort": "মিনিট", "jr.learned": "কী শিখলাম?", "jr.hard": "কোন বিষয় কঠিন মনে হয়েছে?", "jr.mistakes": "কোথায় ভুল করেছি?", "jr.tomorrow": "আগামীকাল কী পড়ব?", "jr.prod": "আজকের productivity কেমন ছিল?", "jr.prodNone": "রেট করা হয়নি", "jr.prodLbl": "৫-এর মধ্যে {n}", "jr.save": "এন্ট্রি সেভ করুন", "jr.delete": "এন্ট্রি মুছুন", "jr.delConfirm": "এই জার্নাল এন্ট্রি মুছবেন?", "jr.edit": "সম্পাদনা", "jr.empty": "আগে কিছু লিখুন, মিনিট দিন, বা দিনটি রেট করুন।", "jr.minsErr": "মিনিট হতে হবে ০ থেকে ১৪৪০-এর মধ্যে পূর্ণ সংখ্যা।", "jr.dateErr": "আজ বা তার আগের একটি তারিখ বেছে নিন।", "jr.saved": "জার্নাল সেভ হয়েছে।", "jr.tabDaily": "দৈনিক", "jr.tabWeekly": "সাপ্তাহিক", "jr.tabMonthly": "মাসিক", "jr.history": "ইতিহাস", "jr.none": "এখনো কোনো এন্ট্রি নেই।", "jr.noneD": "প্রতিদিনের লেখা এখানে দেখাবে।", "jr.weekRange": "সপ্তাহ: {d}", "jr.sumLine": "{c}টি এন্ট্রি · {m} মিনিট পড়া · productivity {p}/৫"});
+Object.assign(I18N.en, {"nav.qbank": "Question bank", "qb.title": "Question bank", "qb.desc": "Practice questions, take quizzes, and review the ones you got wrong.", "qb.add": "Add a question", "qb.edit": "Edit question", "qb.q": "Question", "qb.subj": "Subject", "qb.topic": "Topic (optional)", "qb.type": "Type", "qb.diff": "Difficulty", "qb.opt": "Option {n}", "qb.correct": "Correct option", "qb.ans": "Model answer", "qb.expl": "Explanation (optional)", "qb.tags": "Tags, separated by commas", "qb.save": "Save question", "qb.cancel": "Cancel", "qb.qErr": "Write the question.", "qb.optErr": "Fill in all four options for a multiple-choice question.", "qb.saved": "Question saved.", "qb.tabList": "Questions", "qb.tabQuiz": "Quiz", "qb.tabWrong": "Wrong answers", "qb.type.mcq": "Multiple choice", "qb.type.short": "Short question", "qb.type.broad": "Broad question", "qb.type.math": "Maths problem", "qb.diff.easy": "Easy", "qb.diff.med": "Medium", "qb.diff.hard": "Hard", "qb.all": "All", "qb.favOnly": "Favourites only", "qb.showAns": "Show answer", "qb.fav": "Favourite", "qb.wrongWord": "wrong", "qb.none": "No questions here", "qb.noneD": "Add a question above, or change the filters.", "qb.count": "Questions", "qb.countAll": "All of them", "qb.timer": "Time limit in minutes (0 = none)", "qb.start": "Start quiz", "qb.check": "Check", "qb.show": "Show answer", "qb.skip": "Skip", "qb.gotRight": "I got it right", "qb.gotWrong": "I got it wrong", "qb.next": "Next", "qb.finish": "Finish", "qb.rightMsg": "Correct.", "qb.wrongMsg": "Not quite.", "qb.correctIs": "The correct answer is {n}: {a}", "qb.correctAns": "Model answer", "qb.done": "Quiz finished", "qb.score": "Right: {r} · Wrong: {w} · Skipped: {s}", "qb.practiceWrong": "Practise the wrong ones", "qb.again": "New quiz", "qb.noneQuiz": "Add questions first, or change the filters.", "qb.noneWrong": "No wrong answers yet. Take a quiz to see them here.", "qb.delConfirm": "Delete this question?"});
+Object.assign(I18N.bn, {"nav.qbank": "প্রশ্ন ব্যাংক", "qb.title": "প্রশ্ন ব্যাংক", "qb.desc": "প্রশ্ন অনুশীলন করুন, কুইজ দিন, আর ভুল উত্তরগুলো পর্যালোচনা করুন।", "qb.add": "নতুন প্রশ্ন যোগ করুন", "qb.edit": "প্রশ্ন সম্পাদনা", "qb.q": "প্রশ্ন", "qb.subj": "বিষয়", "qb.topic": "টপিক (ঐচ্ছিক)", "qb.type": "ধরন", "qb.diff": "কঠিনতা", "qb.opt": "অপশন {n}", "qb.correct": "সঠিক অপশন", "qb.ans": "মডেল উত্তর", "qb.expl": "ব্যাখ্যা (ঐচ্ছিক)", "qb.tags": "ট্যাগ, কমা দিয়ে আলাদা করে", "qb.save": "প্রশ্ন সেভ করুন", "qb.cancel": "বাতিল", "qb.qErr": "প্রশ্ন লিখুন।", "qb.optErr": "বহুনির্বাচনী প্রশ্নে চারটি অপশনই পূরণ করুন।", "qb.saved": "প্রশ্ন সেভ হয়েছে।", "qb.tabList": "প্রশ্নসমূহ", "qb.tabQuiz": "কুইজ", "qb.tabWrong": "ভুল উত্তর", "qb.type.mcq": "বহুনির্বাচনী", "qb.type.short": "সংক্ষিপ্ত প্রশ্ন", "qb.type.broad": "রচনামূলক প্রশ্ন", "qb.type.math": "গাণিতিক সমস্যা", "qb.diff.easy": "সহজ", "qb.diff.med": "মাঝারি", "qb.diff.hard": "কঠিন", "qb.all": "সব", "qb.favOnly": "শুধু পছন্দের", "qb.showAns": "উত্তর দেখুন", "qb.fav": "পছন্দের", "qb.wrongWord": "ভুল", "qb.none": "এখানে কোনো প্রশ্ন নেই", "qb.noneD": "উপরে প্রশ্ন যোগ করুন, অথবা ফিল্টার বদলান।", "qb.count": "প্রশ্ন সংখ্যা", "qb.countAll": "সবগুলো", "qb.timer": "সময়সীমা মিনিটে (০ = নেই)", "qb.start": "কুইজ শুরু করুন", "qb.check": "যাচাই করুন", "qb.show": "উত্তর দেখুন", "qb.skip": "এড়িয়ে যান", "qb.gotRight": "আমি ঠিক বলেছি", "qb.gotWrong": "আমি ভুল বলেছি", "qb.next": "পরবর্তী", "qb.finish": "শেষ করুন", "qb.rightMsg": "সঠিক।", "qb.wrongMsg": "ঠিক হয়নি।", "qb.correctIs": "সঠিক উত্তর {n}: {a}", "qb.correctAns": "মডেল উত্তর", "qb.done": "কুইজ শেষ", "qb.score": "ঠিক: {r} · ভুল: {w} · বাদ: {s}", "qb.practiceWrong": "ভুলগুলো আবার অনুশীলন করুন", "qb.again": "নতুন কুইজ", "qb.noneQuiz": "আগে প্রশ্ন যোগ করুন, অথবা ফিল্টার বদলান।", "qb.noneWrong": "এখনো কোনো ভুল উত্তর নেই। কুইজ দিলে এখানে দেখাবে।", "qb.delConfirm": "এই প্রশ্নটি মুছবেন?"});
+Object.assign(I18N.en, {});
+Object.assign(I18N.bn, {});
+Object.assign(I18N.en, {"nav.slots": "Time of day", "sl.title": "Time of day", "sl.desc": "See when you study, and add an optional note for each part of the day.", "sl.today": "Today", "sl.week": "This week", "sl.month": "Month", "sl.ni": "", "sl.nm": "Morning", "sl.na": "Afternoon & evening", "sl.nn": "Night", "sl.u": "Time not recorded", "sl.barNote": "Each session counts toward the part of the day it started in. Manual entries have no start time, so they are shown as not recorded.", "sl.noteDate": "Notes for date", "sl.notesSave": "Save notes", "sl.saved": "Notes saved.", "sl.cfgTitle": "Set the parts of the day (optional)", "sl.cfgM": "Morning starts", "sl.cfgA": "Afternoon & evening starts", "sl.cfgN": "Night starts", "sl.cfgSave": "Save times", "sl.cfgOk": "Times saved.", "sl.cfgErr": "Use times in order: morning, then afternoon & evening, then night, all within one day.", "sl.summary": "Monthly summary: {m}", "sl.noMonth": "No study time recorded in this month yet.", "sl.most": "You studied most in {s}: {m}.", "sl.least": "You studied least in {s}: {m}.", "sl.bestDay": "Best day: {d}, {m}.", "sl.unknown": "{n} session(s) without a start time ({m}) could not be placed in a part of the day.", "sl.notesCount": "Notes this month: morning {a}, afternoon & evening {b}, night {c}.", "sl.prevM": "Previous month", "sl.nextM": "Next month"});
+Object.assign(I18N.bn, {"nav.slots": "দিনের সময়", "sl.title": "দিনের সময়", "sl.desc": "কখন পড়েন তা দেখুন, আর দিনের প্রতিটি ভাগে ঐচ্ছিক একটি নোট লিখুন।", "sl.today": "আজ", "sl.week": "এই সপ্তাহ", "sl.month": "মাস", "sl.nm": "সকাল", "sl.na": "দুপুর ও সন্ধ্যা", "sl.nn": "রাত", "sl.u": "সময় লেখা নেই", "sl.barNote": "প্রতিটি সেশন যে ভাগে শুরু হয়েছে, সেই ভাগে গণনা হয়। হাতে লেখা এন্ট্রিতে শুরুর সময় থাকে না, তাই সেগুলো \"সময় লেখা নেই\"-তে দেখানো হয়।", "sl.noteDate": "নোটের তারিখ", "sl.notesSave": "নোট সেভ করুন", "sl.saved": "নোট সেভ হয়েছে।", "sl.cfgTitle": "দিনের ভাগ ঠিক করুন (ঐচ্ছিক)", "sl.cfgM": "সকাল শুরু", "sl.cfgA": "দুপুর ও সন্ধ্যা শুরু", "sl.cfgN": "রাত শুরু", "sl.cfgSave": "সময় সেভ করুন", "sl.cfgOk": "সময় সেভ হয়েছে।", "sl.cfgErr": "ক্রম ঠিক রাখুন: সকাল, তারপর দুপুর ও সন্ধ্যা, তারপর রাত, সব একই দিনের মধ্যে।", "sl.summary": "মাসিক সামারি: {m}", "sl.noMonth": "এই মাসে এখনো পড়ার সময় জমা হয়নি।", "sl.most": "সবচেয়ে বেশি পড়েছেন {s}-এ: {m}।", "sl.least": "সবচেয়ে কম পড়েছেন {s}-এ: {m}।", "sl.bestDay": "সবচেয়ে ভালো দিন: {d}, {m}।", "sl.unknown": "শুরুর সময় নেই এমন {n}টি সেশন ({m}) কোনো ভাগে বসানো যায়নি।", "sl.notesCount": "এই মাসে নোট: সকাল {a}, দুপুর ও সন্ধ্যা {b}, রাত {c}।", "sl.prevM": "আগের মাস", "sl.nextM": "পরের মাস"});
+Object.assign(I18N.en, {"nf.k.dayplan": "Reading plan"});
+Object.assign(I18N.bn, {"nf.k.dayplan": "পড়ার পরিকল্পনা"});
+Object.assign(I18N.en, {"dp.title": "Today's reading plan", "dp.desc": "Plan what you will study for each subject today. Tick when it is done.", "dp.colSubject": "Subject", "dp.colWhat": "What I will study today", "dp.colMins": "Planned minutes", "dp.colDone": "Done", "dp.other": "Other", "dp.remAt": "Reminder time (empty = off)", "dp.save": "Save plan", "dp.saved": "Plan saved.", "dp.minsErr": "Minutes must be a whole number from 0 to 1440.", "dp.needText": "Write what you will study for each subject that has minutes or a tick.", "dp.noSubjects": "No subjects yet. Add subjects to plan by subject. The Other row works in the meantime.", "dp.off": "Reminders are off in Settings, so this reminder will not appear.", "nf.dpT": "Revise today's plan", "nf.dpM": "You planned: {t}", "hm.bell": "Notifications"});
+Object.assign(I18N.bn, {"dp.title": "আজকের পড়ার পরিকল্পনা", "dp.desc": "প্রতিটি বিষয়ে আজ কী পড়বেন লিখুন। হয়ে গেলে টিক দিন।", "dp.colSubject": "বিষয়", "dp.colWhat": "আজ কী পড়বেন", "dp.colMins": "পরিকল্পিত সময় (মিনিট)", "dp.colDone": "হয়েছে", "dp.other": "অন্যান্য", "dp.remAt": "রিমাইন্ডার সময় (খালি = বন্ধ)", "dp.save": "পরিকল্পনা সেভ করুন", "dp.saved": "পরিকল্পনা সেভ হয়েছে।", "dp.minsErr": "মিনিট হতে হবে ০ থেকে ১৪৪০-এর মধ্যে পূর্ণ সংখ্যা।", "dp.needText": "যে বিষয়ে মিনিট বা টিক দিচ্ছেন, সেখানে কী পড়বেন তা লিখুন।", "dp.noSubjects": "এখনো কোনো বিষয় নেই। বিষয় অনুযায়ী পরিকল্পনা করতে বিষয় যোগ করুন। ততক্ষণ অন্যান্য সারি ব্যবহার করা যায়।", "dp.off": "সেটিংসে রিমাইন্ডার বন্ধ আছে, তাই এই রিমাইন্ডার আসবে না।", "nf.dpT": "আজকের পরিকল্পনা রিভিশন করুন", "nf.dpM": "আপনার পরিকল্পনা ছিল: {t}", "hm.bell": "নোটিফিকেশন"});
+Object.assign(I18N.en, {"nav.routine": "Routine", "rt.title": "Study Routine", "rt.desc": "Plan your daily routine and stay organized!", "rt.active": "Routine Active", "rt.tabWeek": "Weekly View", "rt.tabDay": "Daily View", "rt.tabCustom": "Custom View", "rt.reset": "Reset", "rt.save": "Save Routine", "rt.settings": "Routine Settings", "rt.name": "Routine Name", "rt.start": "Start Date", "rt.repeat": "Blocks repeat every week.", "rt.goal": "Study goal per day (hours)", "rt.goalErr": "The goal must be a whole number from 1 to 16 hours.", "rt.startErr": "Pick a valid start date.", "rt.saved": "Routine saved.", "rt.defName": "My Study Routine", "rt.less": "Less", "rt.more": "More", "rt.resetConfirm": "Remove all blocks from the routine?", "rt.resetDone": "Routine cleared.", "rt.addTitle": "Add to routine", "rt.day": "Day", "rt.kind": "Type", "rt.kStudy": "Study", "rt.kBreak": "Break", "rt.kOther": "Other task", "rt.subject": "Subject", "rt.noSubject": "No subject", "rt.label": "Label (for break or other task)", "rt.from": "Start", "rt.to": "End", "rt.add": "Add block", "rt.timeErr": "The end time must be after the start time.", "rt.needLabel": "Write a label for a break or other task.", "rt.overlap": "This overlaps another block on that day.", "rt.added": "Block added.", "rt.delAria": "Remove block", "rt.delConfirm": "Remove this block?", "rt.deleted": "Block removed.", "rt.none": "No block", "rt.summary": "Routine Summary", "rt.sGoal": "Daily goal", "rt.sDone": "Studied today", "rt.sPlan": "Planned today", "rt.sProg": "Progress", "rt.qa": "Quick Actions", "rt.qaStudy": "Add Study Time", "rt.qaBreak": "Add Break", "rt.qaEdit": "Edit Routine", "rt.qaCal": "View Calendar", "rt.tips": "Routine Tips", "rt.tip1": "Follow your routine consistently for better results.", "rt.tip2": "Keep breaks between long study blocks.", "rt.tip3": "Plan the hardest subject for when you are most alert.", "rt.wd0": "Sun", "rt.wd1": "Mon", "rt.wd2": "Tue", "rt.wd3": "Wed", "rt.wd4": "Thu", "rt.wd5": "Fri", "rt.wd6": "Sat", "nf.k.routine": "Routine", "nf.rtT": "Study time: {t}", "nf.rtM": "Your routine block {s}–{e} has started."});
+Object.assign(I18N.bn, {"nav.routine": "রুটিন", "rt.title": "পড়াশোনার রুটিন", "rt.desc": "দৈনিক রুটিন ঠিক করুন এবং গুছিয়ে থাকুন!", "rt.active": "রুটিন চালু", "rt.tabWeek": "সাপ্তাহিক ভিউ", "rt.tabDay": "দৈনিক ভিউ", "rt.tabCustom": "কাস্টম ভিউ", "rt.reset": "রিসেট", "rt.save": "রুটিন সেভ", "rt.settings": "রুটিনের সেটিংস", "rt.name": "রুটিনের নাম", "rt.start": "শুরুর তারিখ", "rt.repeat": "ব্লকগুলো প্রতি সপ্তাহে একই থাকবে।", "rt.goal": "দিনে পড়ার লক্ষ্য (ঘণ্টা)", "rt.goalErr": "লক্ষ্য হবে ১ থেকে ১৬ ঘণ্টার মধ্যে পূর্ণ সংখ্যা।", "rt.startErr": "সঠিক শুরুর তারিখ দিন।", "rt.saved": "রুটিন সেভ হয়েছে।", "rt.defName": "আমার পড়ার রুটিন", "rt.less": "কম", "rt.more": "বেশি", "rt.resetConfirm": "রুটিনের সব ব্লক মুছবেন?", "rt.resetDone": "রুটিন খালি করা হয়েছে।", "rt.addTitle": "রুটিনে যোগ করুন", "rt.day": "দিন", "rt.kind": "ধরন", "rt.kStudy": "পড়া", "rt.kBreak": "বিরতি", "rt.kOther": "অন্য কাজ", "rt.subject": "বিষয়", "rt.noSubject": "কোনো বিষয় নেই", "rt.label": "লেখা (বিরতি বা অন্য কাজের জন্য)", "rt.from": "শুরু", "rt.to": "শেষ", "rt.add": "ব্লক যোগ করুন", "rt.timeErr": "শেষ সময় শুরুর পরে হতে হবে।", "rt.needLabel": "বিরতি বা অন্য কাজের জন্য একটি লেখা দিন।", "rt.overlap": "ওই দিনের আরেকটি ব্লকের সাথে মিলছে।", "rt.added": "ব্লক যোগ হয়েছে।", "rt.delAria": "ব্লক মুছুন", "rt.delConfirm": "এই ব্লকটি মুছবেন?", "rt.deleted": "ব্লক মুছে গেছে।", "rt.none": "কোনো ব্লক নেই", "rt.summary": "রুটিনের সারসংক্ষেপ", "rt.sGoal": "দৈনিক লক্ষ্য", "rt.sDone": "আজ পড়েছেন", "rt.sPlan": "আজকের পরিকল্পনা", "rt.sProg": "অগ্রগতি", "rt.qa": "দ্রুত কাজ", "rt.qaStudy": "পড়ার সময় যোগ", "rt.qaBreak": "বিরতি যোগ", "rt.qaEdit": "রুটিন সম্পাদনা", "rt.qaCal": "ক্যালেন্ডার দেখুন", "rt.tips": "রুটিনের পরামর্শ", "rt.tip1": "ভালো ফলের জন্য রুটিন নিয়মিত মেনে চলুন।", "rt.tip2": "দীর্ঘ পড়ার ব্লকের মাঝে বিরতি রাখুন।", "rt.tip3": "সবচেয়ে কঠিন বিষয় সবচেয়ে সতেজ সময়ে রাখুন।", "rt.wd0": "রবি", "rt.wd1": "সোম", "rt.wd2": "মঙ্গল", "rt.wd3": "বুধ", "rt.wd4": "বৃহ", "rt.wd5": "শুক্র", "rt.wd6": "শনি", "nf.k.routine": "রুটিন", "nf.rtT": "পড়ার সময়: {t}", "nf.rtM": "রুটিনের ব্লক {s}–{e} শুরু হয়েছে।"});
+function applyStatic(){
+  const lang = langNow();
+  document.documentElement.lang = lang;
+  document.querySelectorAll('[data-i]').forEach(el => { el.textContent = tr(el.dataset.i); });
+  document.querySelectorAll('[data-ia]').forEach(el => el.dataset.ia.split(';').forEach(p => { const i = p.indexOf('='); el.setAttribute(p.slice(0,i).trim(), tr(p.slice(i+1).trim())); }));
+  document.querySelectorAll('[data-wd]').forEach(el => { el.textContent = (lang==='bn'?BN_DAYS:EN_DAYS)[+el.dataset.wd]; });
+  BASE_TITLE = tr('app.title');
+  $('langSel').value = lang;
+  $('copyLine').textContent = tr('foot.copy',{y:new Date().getFullYear()});
+  hintK(hintKey);
+  fillSubjects(); const tsv = $('tSub').value; $('tSub').innerHTML = $('subIn').innerHTML; $('tSub').value = tsv;
+  showBanner(); refreshRecovery();
+}
+let undoItem = null, undoTimer = 0;
+function showUndo(x){ undoItem = x; $('undoMsg').textContent = tr('undo.msg'); $('undo').hidden = false; clearTimeout(undoTimer); undoTimer = setTimeout(hideUndo, 8000); }
+function hideUndo(){ undoItem = null; clearTimeout(undoTimer); $('undo').hidden = true; }
+$('undoBtn').onclick = () => {
+  const x = undoItem; hideUndo(); if(!x || locked()) return;
+  const err = putSession(x); if(err) return toast(err);
+  flashKey = x.id; checkAch(false); render(); toast(tr('undo.done'));
+};
+/* Everything outside the study records that the user set up: profile, photo, cover, font, sidebar, calendar, timer sound and AI chats.
+   Export, import and the recovery copy all carry these, so a restored account looks exactly as it did. */
+const CALP = 'studyTracker.cal.';
+function profGet(){ try{ const p = JSON.parse(localStorage.getItem(NKEY)||'null'); return (p && typeof p==='object' && !Array.isArray(p)) ? p : null; }catch(e){ return null; } }
+function extrasGet(){
+  const x = {font:'', navMini:'', cal:{}, timerPrefs:null};
+  try{ x.font = localStorage.getItem(FKEY)||''; x.navMini = localStorage.getItem('studyTracker.navMini')||''; }catch(e){}
+  try{ for(let i = 0; i < localStorage.length; i++){ const k = localStorage.key(i); if(k && k.indexOf(CALP)===0) x.cal[k.slice(CALP.length)] = localStorage.getItem(k); } }catch(e){}
+  try{ x.timerPrefs = JSON.parse(localStorage.getItem(PKEY)||'null'); }catch(e){}
+  return x;
+}
+/* Writes the profile and preferences of a backup back into this browser. Parts missing from an older backup are left alone. */
+function extrasApply(b){
+  if(!b || typeof b!=='object') return;
+  const p = b.profile, x = (b.extras && typeof b.extras==='object') ? b.extras : {};
+  const put = (k, v) => { try{ localStorage.setItem(k, v); }catch(e){} };
+  if(p && typeof p==='object' && !Array.isArray(p)){
+    const o = Object.assign({}, p);
+    o.name = String(o.name||'').trim().slice(0,40);
+    if(typeof o.pic!=='string' || !o.pic.startsWith('data:image/')) o.pic = '';
+    if(typeof o.cover!=='string' || !o.cover.startsWith('data:image/')) o.cover = '';
+    put(NKEY, JSON.stringify(o)); }
+  if(typeof x.font==='string' && x.font) put(FKEY, x.font);
+  if(x.navMini==='1' || x.navMini==='0') put('studyTracker.navMini', x.navMini);
+  if(x.cal && typeof x.cal==='object') Object.keys(x.cal).forEach(k => { if(/^[\w.-]{1,60}$/.test(k) && typeof x.cal[k]==='string') put(CALP+k, x.cal[k]); });
+  if(x.timerPrefs && typeof x.timerPrefs==='object') put(PKEY, JSON.stringify(x.timerPrefs));
+}
+$('expBtn').onclick = () => {
+  const raw = LOCKED;
+  const body = raw ? (localStorage.getItem(KEY)||'') : JSON.stringify(Object.assign({app:'study-time-tracker', exportedAt:new Date().toISOString(), plan:PL}, snap(), {profile:profGet(), extras:extrasGet()}), null, 2);
+  try{
+    const blob = new Blob([body], {type:'application/json'}), a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = `study-data-${today()}.json`;
+    if(!LOCKED){ state.settings.lastExp = new Date().toISOString(); persist(); }
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+    toast(raw ? tr('exp.raw') : tr('exp.done',{n:state.sessions.length}));
+  }catch(e){ toast(tr('exp.fail',{reason:tr('e.unknown')})); }
+};
+$('impBtn').onclick = () => { if(!locked()) $('file').click(); };
+$('file').onchange = e => {
+  const f = e.target.files && e.target.files[0]; e.target.value = '';
+  if(!f) return;
+  const r = new FileReader();
+  r.onload = () => {
+    let d, nd, np = null;
+    try{                                                   // validate everything first: nothing changes if this fails
+      d = JSON.parse(String(r.result)); nd = checkData(d);
+      if(d.plan!==undefined){ if(!d.plan || typeof d.plan!=='object' || Array.isArray(d.plan)) throw E('e.notBackup'); np = cleanPlan(d.plan).plan; }
+    }catch(err){ return toast(tr('imp.fail',{reason:errText(err)})); }
+    const pc = np ? np.plans.length + np.tasks.length + np.exams.length + np.lib.length + np.notes.length : 0;
+    const opts = LOCKED ? [['replace', tr('imp.replace')]] : [['merge', tr('imp.merge')], ['replace', tr('imp.replace')]];
+    /* An empty account has nothing to merge into, so Replace (which also brings back the profile and photo) is the sensible default */
+    const defMode = (LOCKED || !state.sessions.length) ? 'replace' : 'merge';
+    openForm(tr('imp.title'), `<p class="small">${esc(tr('imp.summary',{s:nd.sessions.length, p:pc}))}</p>`
+      + fld(tr('imp.mode'), optSel('mode', opts, defMode)) + `<p class="small">${esc(tr('imp.modeNote'))}</p>`,
+      tr('imp.btn'), fd => applyImport(nd, np, LOCKED ? 'replace' : fd.get('mode'), d));
+  };
+  r.onerror = () => toast(tr('imp.fail',{reason:tr('e.unknown')}));
+  r.readAsText(f);
+};
+$('resetBtn').onclick = async () => {
+  const wasLocked = LOCKED;
+  if(!(await ask(tr(wasLocked ? 'lock.resetConfirm' : 'reset.all'), tr('reset.btn')))) return;
+  if(wasLocked){ if(!keepRawLocked()) return toast(tr('v.storage')); }
+  else if(!saveRecovery('reset')) return toast(tr('v.storage'));
+  state.sessions = []; state.ach = [];
+  state.settings = Object.assign(cleanPrefs({}), {targetMin:600, theme:state.settings.theme, themeSet:state.settings.themeSet, lang:state.settings.lang});
+  PL = {v:1, subjects:[], tasks:[], notes:[], exams:[], plans:[], lib:[], notif:[], nseen:[]}; savePlan();
+  rebuild(); persist();
+  ['.prev','.backup-v3'].forEach(x => { try{ localStorage.removeItem(KEY+x); }catch(e){} });
+  hideUndo(); tSet('focus'); applyStatic(); resetForm(); render(); toast(tr('reset.done'));
+};
+$('restoreBtn').onclick = async () => {
+  const r = readRecovery(); if(!r || locked()) return;
+  if(!(await ask(tr('restore.confirm',{when:fmtWhen(r.at)}), tr('restore.btn')))) return;
+  let nd, np = null;
+  try{ nd = checkData(r.data, true); if(r.data.plan!==undefined) np = cleanPlan(r.data.plan).plan; }
+  catch(err){ return toast(tr('restore.fail',{reason:errText(err)})); }
+  if(!saveRecovery('restore')) return toast(tr('v.storage'));     // current data becomes the new recovery copy, so this is reversible
+  state = nd; state.ach = null; if(np) PL = np; savePlan(); extrasApply(r.data);
+  rebuild(); persist(); checkAch(false); hideUndo(); tSet('focus');
+  applyStatic(); resetForm(); render(); toast(tr('restore.done'));
+  setTimeout(() => location.reload(), 1200);
+};
+
+/* ================= Stats, streaks, achievements ================= */
+function streaks(){
+  const days = sortedKeys().filter(k=>state.entries[k]>0);
+  let longest = 0, run = 0, prev = null;
+  days.forEach(k => { const d = parse(k); run = (prev && Math.round((d-prev)/864e5)===1) ? run+1 : 1; longest = Math.max(longest,run); prev = d; });
+  const set = new Set(days), d = new Date();
+  if(!set.has(dkey(d))) d.setDate(d.getDate()-1);          // today not studied yet: streak is still alive
+  let cur = 0; while(set.has(dkey(d))){ cur++; d.setDate(d.getDate()-1); }
+  return {cur, longest, days:days.length};
+}
+function stats(){
+  const ks = sortedKeys(), tgt = state.settings.targetMin; let total = 0, best = null, goalDays = 0;
+  ks.forEach(k => { const v = state.entries[k]; total += v; if(v>=tgt) goalDays++; if(!best || v>state.entries[best]) best = k; });
+  return Object.assign({ks,total,best,goalDays,tgt}, streaks());
+}
+const ACH = [
+  [ICO.clock,'First Hour','Study 1 hour in total',x=>x.total>=60],
+  [ICO.target,'Goal Reached','Hit your daily target',x=>x.goalDays>=1],
+  [ICO.flame,'7 Day Streak','Study 7 days in a row',x=>x.longest>=7],
+  [ICO.bolt,'50 Hours','50 total study hours',x=>x.total>=3000],
+  [ICO.gem,'100 Hours','100 total study hours',x=>x.total>=6000],
+  [ICO.crown,'30 Day Streak','Study 30 days in a row',x=>x.longest>=30]];
+function checkAch(say){
+  const x = stats(), ids = ACH.filter(a=>a[3](x)).map(a=>a[1]);
+  if(say && state.ach) ids.filter(i=>!state.ach.includes(i)).forEach(i=>setTimeout(()=>toast(tr('ach.unlocked',{name:tr(ACHL[i][0])})),1000));
+  state.ach = ids; persist();
+}
+function fillSel(id, opts, all){
+  const el = $(id), cur = el.value;
+  el.innerHTML = `<option value="">${all}</option>` + opts.map(([v,l])=>`<option value="${esc(v)}">${esc(l)}</option>`).join('');
+  el.value = cur; if(el.value!==cur) el.value = '';
+}
+function fillSubjects(){
+  ['subIn','tSub'].forEach(id => { const el = $(id), cur = el.value;
+    el.innerHTML = `<option value=''>${tr('sub.optNone')}</option>` + state.subjects.map(x=>`<option>${esc(x)}</option>`).join(''); el.value = cur; });
+}
+/* ================= Analytics: every number below is derived from state.sessions (via state.entries) ================= */
+const dAdd = (d,n) => { const x = new Date(d); x.setDate(x.getDate()+n); return x; };
+const wd = k => (bn()?BN_DAYS:EN_DAYS)[parse(k).getDay()];
+const pc = (v,t) => t>0 ? Math.round(v/t*100) : null;
+const firstDate = () => state.sessions.length ? state.sessions[0].date : null;          // sessions are kept sorted by rebuild()
+let gR = '30', gOff = 0, gSel = null, pMap = new Map(), gDrawn = '', heatKey = '', heatSel = null, heatPrev = null, heatEls = {}, heatStart = '';
+
+/* period(range, offset): buckets (days / weeks / months) + totals. Cached until the data, target, date or language changes. */
+function period(r, off){
+  const tgt = state.settings.targetMin, key = [dataVer,r,off,tgt,today(),state.settings.lang].join('|');
+  if(pMap.has(key)) return pMap.get(key);
+  const now = new Date(); now.setHours(0,0,0,0); const fd = firstDate(), spans = []; let kind = 'day';
+  if(r==='7'||r==='15'||r==='30'){ const n = +r, end = dAdd(now,-off*n); for(let i=0;i<n;i++){ const d = dAdd(end,i-(n-1)); spans.push({s:d,e:d,l:d.getDate()}); } }
+  else if(r==='m'){ const ref = new Date(now.getFullYear(), now.getMonth()-off, 1), n = off ? new Date(ref.getFullYear(), ref.getMonth()+1, 0).getDate() : now.getDate();
+    for(let i=0;i<n;i++){ const d = dAdd(ref,i); spans.push({s:d,e:d,l:d.getDate()}); } }
+  else if(r==='150'){ kind = 'week'; const ref = dAdd(now,-off*154), sun = dAdd(ref,-ref.getDay());
+    for(let w=21;w>=0;w--){ const s0 = dAdd(sun,-7*w); spans.push({s:s0, e:dAdd(s0,6), l:`${s0.getDate()}/${s0.getMonth()+1}`}); } }
+  else { kind = 'month'; const ref = new Date(now.getFullYear()-off, now.getMonth(), 1);
+    for(let i=11;i>=0;i--){ const s0 = new Date(ref.getFullYear(), ref.getMonth()-i, 1); spans.push({s:s0, e:new Date(s0.getFullYear(), s0.getMonth()+1, 0), l:monShort(s0.getMonth())}); } }
+  const bars = []; let total = 0, trk = 0, act = 0, reach = 0, best = null;
+  spans.forEach(sp => {
+    const ce = sp.e>now ? now : sp.e, b = {kind, l:sp.l, s:dkey(sp.s), e:dkey(ce), v:0, act:0, rec:0, trk:0};
+    for(let d = new Date(sp.s); d<=ce; d = dAdd(d,1)){ const k = dkey(d);
+      if(fd && k>=fd) b.trk++;
+      if(k in state.entries){ const m = state.entries[k]; b.rec++; b.v += m; if(m>0){ b.act++; if(!best || m>state.entries[best]) best = k; } if(tgt && m>=tgt) reach++; } }
+    b.tl = tgt*b.trk; b.hit = b.tl>0 && b.v>=b.tl;                                           // target in the same unit (minutes) as the bar
+    b.zero = kind==='day' && b.rec>0 && b.v===0; b.none = kind==='day' && b.rec===0; b.pre = !fd || b.s<fd;
+    b.t = kind==='day' ? `${wd(b.s)} ${short(b.s)}` : kind==='week' ? `${short(b.s)} – ${short(dkey(sp.e))}` : `${monthName(sp.s.getMonth())} ${sp.s.getFullYear()}`;
+    total += b.v; trk += b.trk; act += b.act; bars.push(b);
+  });
+  const rs = bars[0].s, re = bars[bars.length-1].e, subs = {}; let sess = 0;
+  state.sessions.forEach(z => { if(z.min>0 && z.date>=rs && z.date<=re){ sess++; const n = z.sub || tr('sub.none'); subs[n] = (subs[n]||0)+z.min; } });
+  const yr = parse(re).getFullYear(), v = {kind, bars, rs, re, total, trk, act, reach, best, sess, tgt,
+    subs:Object.entries(subs).sort((a,b)=>b[1]-a[1]), label:`${short(rs)}${parse(rs).getFullYear()!==yr?' '+parse(rs).getFullYear():''} – ${short(re)} ${yr}`};
+  if(pMap.size>10) pMap.clear(); pMap.set(key,v); return v;
+}
+function gDetail(b){
+  const tgt = state.settings.targetMin;
+  if(b.kind==='day'){
+    if(b.pre) return `<b>${b.t}</b> · ${tr('det.before')}`;
+    if(b.none) return `<b>${b.t}</b> · ${tr('det.none')}`;
+    if(b.zero) return `<b>${b.t}</b> · ${tr('det.zero')}`;
+    const ss = state.sessions.filter(z=>z.date===b.s && z.min>0), subs = [...new Set(ss.map(z=>z.sub).filter(Boolean))];
+    return `<b>${b.t}</b> · ${dur(b.v)}${tgt?` · ${tr('det.pct',{p:pc(b.v,tgt)})}${b.hit?tr('det.reached'):''}`:''} · ${tr(ss.length===1?'sess.one':'sess.many',{n:ss.length})}${subs.length?'<br>'+esc(subs.join(', ')):''}`;
+  }
+  return `<b>${b.t}</b> · ${dur(b.v)} · ${tr('det.activeOf',{a:b.act,b:b.trk})}${b.tl?` · ${tr('det.targetOf',{p:pc(b.v,b.tl),d:dur(b.tl)})}${b.hit?' ✓':''}`:''}${b.act?` · ${tr('det.perActive',{d:dur(b.v/b.act)})}`:''}`;
+}
+function gSelect(i){
+  const p = period(gR,gOff); if(!p.bars[i]) return; gSel = i;                      // updates the highlight + details only, no chart rebuild
+  $('gChart').querySelectorAll('.gs').forEach((r,j) => r.classList.toggle('on', j===i)); $('gInfo').innerHTML = gDetail(p.bars[i]);
+}
+function renderGraph(){
+  const p = period(gR,gOff), tgt = p.tgt, fd = firstDate(), any = state.sessions.some(x=>x.min>0);
+  $('gPeriod').textContent = p.label; $('gNext').disabled = gOff===0; $('gPrev').disabled = !fd || p.rs<=fd;
+  $('gEmpty').hidden = p.total>0; $('gBody').hidden = !(p.total>0);
+  $('gEmpty').textContent = any ? tr('trend.empty') : tr('trend.emptyNone');
+  if(!(p.total>0)){ gDrawn = ''; return; }
+  const dk = [dataVer,gR,gOff,tgt,today(),state.settings.lang].join('|'); if(gDrawn===dk) return; gDrawn = dk;   // nothing changed: keep chart + selection
+  const bars = p.bars, n = bars.length, W=340, H=190, L=32, R=6, Tp=10, B=22, pw=W-L-R, ph=H-Tp-B, slot = pw/n, bw = Math.max(3,slot*.68), ls = Math.ceil(n/8);
+  const maxH = Math.ceil(Math.max(...bars.map(b=>Math.max(b.v,b.tl)), 60)/60), step = Math.ceil(maxH/4), top = step*4*60, y = v => Tp+ph-v/top*ph;
+  let g = '', hasZero = false;
+  for(let i=0;i<=4;i++){ const yy = y(i*step*60); g += `<line x1="${L}" x2="${W-R}" y1="${yy}" y2="${yy}" class="gl"/><text x="${L-5}" y="${yy+3}" text-anchor="end" class="gt">${i*step}h</text>`; }
+  bars.forEach((b,i) => { const x = L+i*slot+(slot-bw)/2, hh = b.v/top*ph;
+    g += `<rect class="gs" x="${L+i*slot}" y="${Tp}" width="${slot}" height="${ph}"/>`;
+    if(b.v>0) g += `<rect class="gb${b.hit?' hit':''}" x="${x}" y="${Tp+ph-hh}" width="${bw}" height="${hh}" rx="2"/>` + (b.hit ? `<rect class="cap" x="${x}" y="${Tp+ph-hh}" width="${bw}" height="3"/>` : '');
+    if(b.zero){ hasZero = true; g += `<circle class="gz" cx="${x+bw/2}" cy="${Tp+ph-3}" r="2.6"/>`; }
+    if(b.tl>0) g += `<line class="gtk" x1="${x-1}" x2="${x+bw+1}" y1="${y(b.tl)}" y2="${y(b.tl)}"/>`;
+    if(i%ls===0) g += `<text x="${x+bw/2}" y="${H-7}" text-anchor="middle" class="gt">${b.l}</text>`;
+    g += `<rect data-i="${i}" x="${L+i*slot}" y="${Tp}" width="${slot}" height="${ph}" fill="transparent"/>`; });
+  const unit = p.kind==='day' ? 'day' : p.kind==='week' ? 'week' : 'month', avg = p.trk ? p.total/p.trk : 0;
+  const text = tr('txt.sum',{label:p.label,total:dur(p.total),act:p.act,trk:p.trk,avg:dur(avg)}) + (p.best?tr('txt.best',{day:short(p.best),dur:dur(state.entries[p.best])}):'') + (tgt?tr('txt.reach',{n:p.reach}):'') + '.';
+  $('gChart').innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="${esc(text)}">${g}</svg>`;
+  $('gText').textContent = text;
+  $('gLegend').innerHTML = `<span><i class='sw hit'></i>${tr('legend.hit')}</span><span><i class='sw'></i>${tr('legend.below')}</span><span><i class='sw tg'></i>${tr('legend.target',{u:tr('unit.'+p.kind)})}</span>${hasZero?`<span><i class='sw zero'></i>${tr('legend.zero')}</span>`:''}${p.kind==='day'?`<span>${tr('legend.blank')}</span>`:''}<span>${tr('legend.start')}</span>`;
+  gSelect(gSel!==null && gSel<n ? gSel : n-1);
+  $('gSum').innerHTML = [[tr('sum.total'), dur(p.total)], [tr('sum.avgTracked'), p.trk ? dur(avg) : '—'], [tr('sum.active'), `${p.act} / ${p.trk}`], [tr('sum.avgActive'), p.act ? dur(p.total/p.act) : '—'], [tr('sum.best'), p.best ? `${short(p.best)} · ${hm(state.entries[p.best])}` : '—'],
+    [tr('sum.targetDays'), tgt && p.trk ? `${p.reach} / ${p.trk} (${pc(p.reach,p.trk)}%)` : '—'], [tr('sum.streak'), tr('streak.now',{c:stats().cur,l:stats().longest})], [tr('sum.vsTarget'), tgt && p.trk ? `${pc(p.total,tgt*p.trk)}% of ${dur(tgt*p.trk)}` : '—']]
+    .map(r=>`<div class="tile"><span>${r[0]}</span><b style="font-size:.98rem">${r[1]}</b></div>`).join('');
+  $('gSubs').innerHTML = p.subs.length ? p.subs.map(([nm,v])=>`<div class="sb"><div class="r"><span>${esc(nm)}</span><b>${dur(v)} · ${pc(v,p.total)}%</b></div><div class="t"><i style="width:${v/p.subs[0][1]*100}%"></i></div></div>`).join('') : `<div class='small'>${tr('sub.noneP')}</div>`;
+  $('gTbl').innerHTML = `<table class="tbl"><tr><th>${tr('unit.'+p.kind)}</th><th>${tr('tbl.studied')}</th><th>${tr('tbl.target')}</th></tr>` + bars.map(b=>`<tr><td>${b.t}</td><td>${b.none?tr('tbl.noRec'):b.pre?'—':dur(b.v)}</td><td>${b.tl?dur(b.tl):'—'}</td></tr>`).join('') + '</table>';
+}
+$('gRange').onclick = e => { const b = e.target.closest('button'); if(!b) return; gR = b.dataset.r; gOff = 0; gSel = null;
+  document.querySelectorAll('#gRange button').forEach(x => { x.classList.toggle('on',x===b); x.setAttribute('aria-pressed',x===b); }); renderGraph(); };
+$('gPrev').onclick = () => { gOff++; gSel = null; renderGraph(); };
+$('gNext').onclick = () => { if(gOff>0){ gOff--; gSel = null; renderGraph(); } };
+$('gChart').onclick = e => { const r = e.target.closest('[data-i]'); if(r) gSelect(+r.dataset.i); };
+$('gChart').addEventListener('keydown', e => { const m = {ArrowLeft:-1,ArrowRight:1}[e.key]; if(!m) return; e.preventDefault();
+  const n = period(gR,gOff).bars.length, i = Math.min(n-1,Math.max(0,(gSel===null?n-1:gSel)+m)); gSelect(i); });
+
+/* ---- Heatmap: last 18 weeks, intensity = % of the daily target; recorded 0 (ring) is different from no record ---- */
+function heatSelect(k){
+  const tgt = state.settings.targetMin, today0 = today();
+  if(!(k in heatEls)) k = today0;
+  heatSel = k;
+  if(heatPrev) heatPrev.classList.remove('sel');
+  heatPrev = heatEls[k]; if(heatPrev) heatPrev.classList.add('sel');
+  if(!state.sessions.some(x=>x.min>0)){ $('heatInfo').textContent = tr('heat.noData'); return; }
+  const v = state.entries[k]||0, has = k in state.entries, fd = state.sessions.length ? sortedKeys()[0] : null;
+  const ss = state.sessions.filter(z=>z.date===k && z.min>0), subs = [...new Set(ss.map(z=>z.sub).filter(Boolean))], notes = ss.map(z=>z.note).filter(Boolean);
+  const status = (fd && k<fd) ? tr('det.before') : !has ? tr('det.none') : v===0 ? tr('det.zero')
+    : `${dur(v)}${tgt?` · ${tr('det.pct',{p:pc(v,tgt)})}${v>=tgt?' ✓':''}`:''} · ${tr(ss.length===1?'sess.one':'sess.many',{n:ss.length})}`;
+  $('heatInfo').innerHTML = `<b>${wd(k)}, ${short(k)} ${parse(k).getFullYear()}</b> · ${status}` + (subs.length?`<br>${esc(subs.join(', '))}`:'') + (notes.length?` — ${esc(notes.join(' / '))}`:'');
+}
+function heatSum(){
+  const tgt = state.settings.targetMin; let act = 0, hit = 0;
+  const end = today(); let k = heatStart;
+  while(k && k<=end){ const v = state.entries[k]||0; if(v>0){ act++; if(tgt && v>=tgt) hit++; } const d = parse(k); d.setDate(d.getDate()+1); k = dkey(d); }
+  $('heatSum').textContent = tr('heat.sum',{a:act,b:hit});
+}
+function renderHeat(){
+  const hk = [dataVer,state.settings.targetMin,today(),state.settings.lang].join('|'); if(hk===heatKey) return; heatKey = hk;
+  const HW = 18, tgt = state.settings.targetMin, t = today(), now = new Date(), st = dAdd(now,-((HW-1)*7+now.getDay())); heatStart = dkey(st);
+  let h = '', mon = '';
+  for(let i=0;i<HW*7;i++){ const k = dkey(dAdd(st,i)), has = k in state.entries, v = state.entries[k]||0, r = tgt?v/tgt:0, l = v<=0?0:r<.25?1:r<.6?2:r<1?3:4;
+    h += `<div class="hc l${l}${has&&v===0?' z':''}${k>t?' fut':''}${k===t?' today':''}" data-k="${k}" aria-label="${short(k)}: ${has ? (v ? dur(v) : tr('det.zero')) : tr('det.none')}"></div>`; }
+  for(let w=0;w<HW;w++){ const m = dAdd(st,w*7).getMonth(); mon += `<span>${w===0||dAdd(st,(w-1)*7).getMonth()!==m ? monShort(m) : ''}</span>`; }
+  $('heat').innerHTML = h; heatSum(); $('hmon').innerHTML = mon; heatEls = {}; heatPrev = null;
+  $('heat').querySelectorAll('.hc').forEach(c => heatEls[c.dataset.k] = c);
+  heatSelect(heatSel && heatSel>=heatStart ? heatSel : t);
+}
+$('heat').onclick = e => { const c = e.target.closest('.hc'); if(c && !c.classList.contains('fut')) heatSelect(c.dataset.k); };
+$('heat').addEventListener('keydown', e => { const m = {ArrowUp:-1,ArrowDown:1,ArrowLeft:-7,ArrowRight:7}[e.key]; if(!m) return; e.preventDefault();
+  const k = dkey(dAdd(parse(heatSel||today()),m)); if(k>=heatStart && k<=today()) heatSelect(k); });
+
+/* Heat date picker (large touch target for choosing any day in the last 18 weeks) */
+$('heatDate').onchange = e => { const v = e.target.value; if(!v) return; if(v in heatEls) heatSelect(v); else toast(tr('heat.outside')); };
+/* ---- Cards: hero extras, quick stats, monthly, advanced, achievements, this-week progress ---- */
+function renderCards(){
+  const x = stats(), tgt = x.tgt, t = today(), tm = state.entries[t]||0, hr = new Date().getHours();
+  $('greet').textContent = `${hr<12?tr('home.morning'):hr<17?tr('home.afternoon'):tr('home.evening')}${profName?', '+(profRaw().user||profName):''}`;
+  $('tStreak').textContent = tr('home.streak',{n:x.cur});
+  $('tTgt').textContent = dur(tgt); $('tRem').textContent = tm>=tgt ? tr('home.goalReached') : dur(tgt-tm);
+  $('q1').textContent = x.cur===1 ? tr('day.one') : tr('day.many',{n:x.cur}); $('q1s').textContent = tr('qs.longest',{n:x.longest});
+  $('q2').textContent = pc(tm,tgt)+'%'; $('q2s').textContent = tr('qs.ofGoal');
+  $('q3').textContent = Math.floor(x.total/60)+'h'; $('q3s').textContent = tr('qs.minRem',{m:pad(x.total%60)});
+  $('q4').textContent = x.days; $('q4s').textContent = tr('qs.goalDays',{n:x.goalDays});
+  const nd = new Date(), mk = t.slice(0,7), pd = new Date(nd.getFullYear(), nd.getMonth()-1, 1), pk = dkey(pd).slice(0,7);
+  const ms = q => x.ks.filter(k=>k.startsWith(q)), sum = q => ms(q).reduce((a,k)=>a+state.entries[k],0);
+  const cm = sum(mk), pm = sum(pk), md = ms(mk).filter(k=>state.entries[k]>0);
+  const mp = period('m',0); $('mDays').textContent = mp.trk ? tr('mon.dayCount',{a:mp.act,b:mp.trk}) : '—';
+  $('mGoal').textContent = mp.trk ? tr('mon.reachCount',{a:mp.reach,b:mp.trk,p:pc(mp.reach,mp.trk)}) : '—';
+  $('mCmp').textContent = pm ? `${monthName(pd.getMonth())} ${dur(pm)} → ${monthName(nd.getMonth())} ${dur(cm)} (${cm>=pm?'+':''}${((cm-pm)/pm*100).toFixed(1)}%)` : tr('mon.noPrev',{cur:`${monthName(nd.getMonth())} ${dur(cm)}`});
+  $('adv').innerHTML = [[tr('adv.days'),x.days],[tr('adv.cur'),x.cur+' '+tr('adv.dayWord')],[tr('adv.longest'),x.longest+' '+tr('adv.dayWord')],
+    [tr('adv.bestDay'), x.best&&state.entries[x.best]>0?`${short(x.best)} — ${hm(state.entries[x.best])}`:'—'],[tr('adv.targetRate'), x.days?Math.round(x.goalDays/x.days*100)+'%':'—']]
+    .map(r=>`<div class="stat"><span>${r[0]}</span><b>${r[1]}</b></div>`).join('');
+  $('ach').innerHTML = ACH.map(a=>`<div class="ac${a[3](x)?' on':''}"><span>${a[0]}</span><b>${tr(ACHL[a[1]][0])}</b><small>${tr(ACHL[a[1]][1])}</small></div>`).join('');
+  // This week (Sun-Sat). The weekly target is derived: 7 x daily target (there is no separate weekly setting).
+  const ws = dAdd(nd,-nd.getDay()); let wv = 0; for(let i=0;i<7;i++) wv += state.entries[dkey(dAdd(ws,i))]||0;
+  const wt = tgt*7, wp = wt ? wv/wt*100 : 0;
+  $('gWeek').innerHTML = `<div class="prog-meta" style="color:var(--ink)"><span>${tr('week.thisWeek',{a:dur(wv),b:dur(wt)})}</span><b>${Math.round(wp)}%</b></div><div class="track" role="progressbar" aria-label="${tr('week.progLbl')}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.min(100,Math.round(wp))}"><div class="fill" style="width:${Math.min(100,wp)}%"></div></div><div class="small">${tr('week.note')}</div>`;
+}
+function renderSubjectsAll(){
+  const sm = {}; state.sessions.forEach(z => { if(z.min>0){ const n = z.sub || tr('sub.none'); sm[n] = (sm[n]||0)+z.min; } });
+  const arr = Object.entries(sm).sort((a,b)=>b[1]-a[1]), tot = arr.reduce((a,z)=>a+z[1],0);
+  $('subs').innerHTML = arr.length ? arr.map(([n,v])=>`<div class="sb"><div class="r"><span>${esc(n)}</span><b>${dur(v)} · ${pc(v,tot)}%</b></div><div class="t"><i style="width:${v/arr[0][1]*100}%"></i></div></div>`).join('')
+    : `<div class='empty'>${tr('sub.empty')}</div>`;
+}
+function render(){ renderBase(); renderCards(); renderSubjectsAll(); renderHeat(); renderGraph(); calRender(); }
+['fq','fm','fs','fo'].forEach(id => $(id).addEventListener('input', renderHistory));       // filters only touch the history list
+
+/* stats()/streaks() are cheap to call repeatedly: results are cached until the data, date or target changes */
+const memoFn = f => { let key, val; return () => { const k = dataVer+'|'+today()+'|'+state.settings.targetMin; if(k!==key){ val = f(); key = k; } return val; }; };
+streaks = memoFn(streaks); stats = memoFn(stats);
+
+/* ================= Focus timer =================
+   Timer state (T, saved under KEY+'.timer') is separate from study sessions. Only a completed FOCUS phase creates a session
+   (id 'tm'+runId, so it can never be stored twice); breaks are never recorded. */
+const T = {mode:'25', phase:'focus', f:25, b:5, left:1500, end:0, run:false, runId:null, focusMin:25, sub:''};
+const TKEY = KEY + '.timer', PKEY = KEY + '.timerPrefs', CIRC = 2*Math.PI*52; let BASE_TITLE = document.title;
+const storedHas = id => { try{ return JSON.parse(localStorage.getItem(KEY)).sessions.some(x=>x.id===id); }catch(e){ return false; } };
+let prefs = {sound:false, notify:false};
+try{ const p = JSON.parse(localStorage.getItem(PKEY)||'null'); if(p && typeof p==='object') prefs = {sound:p.sound===true, notify:p.notify===true}; }catch(e){}
+const savePrefs = () => { try{ localStorage.setItem(PKEY, JSON.stringify(prefs)); }catch(e){} };
+const tMsg = t => { $('tMsg').textContent = t; };
+let hintKey = '';
+const hintK = k => { hintKey = k || ''; $('pHint').textContent = k ? tr(k) : ''; };
+const hint = t => { $('pHint').textContent = t || ''; };
+const tFull = () => (T.phase==='focus' ? T.f : T.b)*60;
+
+/* Custom durations: whole numbers, focus 1-180, break 1-60. Valid values become T.f / T.b; invalid ones show an inline error. */
+function checkCustom(){
+  if(T.mode!=='c'){ $('tErr').textContent = ''; return true; }
+  const f = Number($('cF').value), b = Number($('cB').value), ok = $('cF').value.trim()!=='' && $('cB').value.trim()!=='' && isInt(f,1,180) && isInt(b,1,60);
+  $('tErr').textContent = ok ? '' : tr('timer.errCustom');
+  $('cF').setAttribute('aria-invalid', !(isInt(f,1,180))); $('cB').setAttribute('aria-invalid', !(isInt(b,1,60)));
+  if(ok){ T.f = f; T.b = b; } return ok;
+}
+function applyMode(){
+  if(T.mode==='25'){ T.f = 25; T.b = 5; } else if(T.mode==='50'){ T.f = 50; T.b = 10; }
+  $('cRow').hidden = T.mode!=='c';
+  document.querySelectorAll('#tModes button').forEach(x => { const on = x.dataset.m===T.mode; x.classList.toggle('on',on); x.setAttribute('aria-pressed',on); });
+  checkCustom();
+}
+function tShow(){
+  const full = tFull(), prog = full ? 1-T.left/full : 0, started = T.run || T.left < full, clock = `${pad(Math.floor(T.left/60))}:${pad(T.left%60)}`;
+  $('tClock').textContent = clock; $('tPhase').textContent = T.phase==='focus' ? tr('timer.focus') : tr('timer.break');
+  $('tRing').style.strokeDashoffset = CIRC*(1-prog); $('tRingWrap').setAttribute('aria-valuenow', Math.round(prog*100));
+  document.querySelector('.timer').dataset.phase = T.phase;
+  $('tStart').textContent = T.run ? tr('timer.pause') : started ? tr('timer.resume') : (T.phase==='focus' ? tr('timer.start') : tr('timer.startBreak'));
+  $('tSkip').hidden = T.phase!=='break';
+  document.querySelectorAll('#tModes button').forEach(x => x.disabled = T.run);            // no mode change while running
+  $('cF').disabled = $('cB').disabled = started;                                          // durations are frozen once a session has begun
+  document.title = T.run ? `${clock} · ${T.phase==='focus'?tr('timer.focus'):tr('timer.break')} — ${BASE_TITLE}` : BASE_TITLE;
+}
+/* Running focus run is mirrored to storage so a refresh neither loses nor duplicates it */
+function tSave(){
+  try{ if(T.phase==='focus' && T.runId) localStorage.setItem(TKEY, JSON.stringify({mode:T.mode,run:T.run,end:T.end,left:T.left,runId:T.runId,focusMin:T.focusMin,sub:T.sub,pid:T.pid||'',cF:$('cF').value,cB:$('cB').value}));
+       else localStorage.removeItem(TKEY); }catch(e){}
+}
+function tSet(phase){ T.phase = phase; T.left = tFull(); T.run = false; T.runId = null; T.pid = ''; tShow(); tSave(); }
+function tRestore(){
+  let r = null; try{ r = JSON.parse(localStorage.getItem(TKEY)||'null'); }catch(e){}
+  const ok = r && !LOCKED && ['25','50','c'].includes(r.mode) && isInt(r.runId,1,4e12) && isInt(r.focusMin,1,180) && Number.isFinite(r.left) && r.left>=0 && r.left<=10800;
+  if(!ok){ try{ localStorage.removeItem(TKEY); }catch(e){} return; }
+  T.mode = r.mode; if(T.mode==='c'){ $('cF').value = isInt(+r.cF,1,180)?r.cF:25; $('cB').value = isInt(+r.cB,1,60)?r.cB:5; }
+  applyMode(); T.f = r.focusMin; T.phase = 'focus'; T.runId = r.runId; T.focusMin = r.focusMin; T.sub = cstr(r.sub,30); T.pid = cstr(r.pid,40); $('tSub').value = T.sub;
+  if(r.run && isInt(r.end,1,4e12)){ T.end = r.end; T.run = true; T.left = Math.max(0,Math.ceil((r.end-Date.now())/1000)); tShow(); if(T.left<=0) tDone(); }   // finished while closed: completes once
+  else { T.run = false; T.left = Math.round(r.left); tShow(); tMsg(tr('timer.restored')); }
+}
+/* Feedback: optional sound (generated, no files) and optional browser notification; both may be unavailable */
+let actx = null;
+function unlockAudio(){ if(!prefs.sound) return; try{ actx = actx || new (window.AudioContext||window.webkitAudioContext)(); if(actx.state==='suspended') actx.resume(); }catch(e){} }
+function beep(){
+  if(!prefs.sound) return;
+  try{ unlockAudio(); const t0 = actx.currentTime;
+    [660,880].forEach((f,i) => { const o = actx.createOscillator(), g = actx.createGain(), t = t0+i*.25; o.frequency.value = f; o.connect(g); g.connect(actx.destination);
+      g.gain.setValueAtTime(.0001,t); g.gain.exponentialRampToValueAtTime(.25,t+.03); g.gain.exponentialRampToValueAtTime(.0001,t+.22); o.start(t); o.stop(t+.24); });
+  }catch(e){}
+}
+/* Shows an OS notification. Android Chrome accepts notifications only from the service worker, so that route is used.
+   While the service worker is still registering, the notification waits in a queue (never sent through the page
+   constructor, which Android rejects). Failures are recorded and shown in Settings, never swallowed. */
+let OS_QUEUE = [], OS_REG_DONE = false;
+function osNotify(title, body, tag, dest){
+  if(typeof Notification === 'undefined' || Notification.permission !== 'granted') return false;
+  const item = {title: String(title), body: String(body || ''), tag: tag || undefined, dest: SAFE_DEST(dest)};
+  if(!SW_REG && 'serviceWorker' in navigator && !OS_REG_DONE){ OS_QUEUE.push(item); return true; }
+  return showOs(item); }
+function showOs(it){
+  const opts = {body: it.body, tag: it.tag, icon: 'icon-192.png', badge: 'icon-192.png', data: {dest: it.dest}};
+  if(SW_REG){
+    try{ SW_REG.showNotification(it.title, opts).catch(e => { OS_ERR = String((e && e.message) || e); }); return true; }
+    catch(e){ OS_ERR = String((e && e.message) || e); } }
+  try{ new Notification(it.title, opts); return true; }
+  catch(e){ OS_ERR = String((e && e.message) || e); return false; } }
+function flushOsQueue(){ const q = OS_QUEUE; OS_QUEUE = []; q.forEach(showOs); }
+function signal(body){
+  beep();
+  if(prefs.notify) osNotify('Study Time Tracker', body, 'timer', 'home');   // Android: routed through the service worker
+}
+function syncPrefs(){
+  if(!('Notification' in window)){ prefs.notify = false; $('pNotify').disabled = true; hintK('pref.noNotif'); }
+  else if(prefs.notify && Notification.permission!=='granted') prefs.notify = false;
+  $('pSound').checked = prefs.sound; $('pNotify').checked = prefs.notify;
+}
+$('pSound').onchange = e => { prefs.sound = e.target.checked; savePrefs(); if(prefs.sound) beep(); };      // test beep confirms it works
+$('pNotify').onchange = async e => {
+  if(!e.target.checked){ prefs.notify = false; savePrefs(); hintK(''); return; }
+  let perm = Notification.permission;                                   // permission is only requested here, after a tap
+  if(perm==='default'){ try{ perm = await Notification.requestPermission(); }catch(err){ perm = 'denied'; } }
+  prefs.notify = perm==='granted'; e.target.checked = prefs.notify; savePrefs();
+  hintK(prefs.notify ? '' : 'pref.denied');
+};
+/* Completion: guarded so interval, visibilitychange and restore can never complete the same run twice */
+function tDone(){
+  if(!T.run) return;
+  const pid = T.pid;
+  T.run = false;
+  if(T.phase==='focus'){
+    const m = T.focusMin, id = 'tm'+T.runId, date = dkey(new Date(T.runId)); let msg;
+    if(state.sessions.some(x=>x.id===id) || storedHas(id)) msg = tr('timer.saved');
+    else {
+      const min = Math.min(m, 1440-dayTotal(date));
+      const err = min<1 ? tr('timer.dayLimit') : putSession({id, date, min, sub:T.sub, note:'', src:'timer', start:T.runId, end:Date.now()});
+      if(err) msg = err; else { flashKey = id; msg = tr('timer.doneMsg',{n:min}); linkPlanTime(pid, min); checkAch(true); render(); }
+    }
+    tSet('break'); tMsg(msg+' '+tr('timer.breakReady')); toast(msg); signal(tr('timer.focusNotif'));
+  } else { tSet('focus'); tMsg(tr('timer.breakOver')); toast(tr('timer.breakOverShort')); signal(tr('timer.breakNotif')); }
+}
+function tTick(){ if(!T.run) return; T.left = Math.max(0, Math.ceil((T.end-Date.now())/1000)); tShow(); if(T.left<=0) tDone(); }
+$('tStart').onclick = () => {
+  if(T.run){ tTick(); if(T.run){ T.run = false; tMsg(tr('timer.paused')); } }          // pause
+  else {                                                                                               // start / resume
+    if(locked() || !checkCustom()) return;
+    unlockAudio();
+    if(T.phase==='focus' && !T.runId){ T.runId = Date.now(); T.focusMin = T.f; T.sub = $('tSub').value; }   // fixed once per run
+    T.end = Date.now()+T.left*1000; T.run = true; tMsg('');
+  }
+  tShow(); tSave();
+};
+$('tReset').onclick = async () => {
+  if(T.run || T.left < tFull()){ if(!(await ask(tr('timer.resetConfirm'),tr('btn.reset')))) return; }
+  if(T.mode==='c'){ $('cF').value = T.f; $('cB').value = T.b; checkCustom(); }
+  tSet(T.phase); tMsg('');
+};
+$('tSkip').onclick = () => { tSet('focus'); tMsg(tr('timer.skipped')); };
+$('tModes').onclick = async e => { const b = e.target.closest('button'); if(!b || b.disabled || b.dataset.m===T.mode) return;
+  if(T.left < tFull()){ if(!(await ask(tr('timer.switchConfirm'),tr('btn.switch')))) return; }
+  T.mode = b.dataset.m; applyMode(); tSet('focus'); tMsg(''); };
+['cF','cB'].forEach(id => { $(id).addEventListener('input', checkCustom); $(id).addEventListener('change', () => { if(checkCustom()) tSet(T.phase); }); });
+setInterval(tTick, 250); ['visibilitychange','pageshow','focus'].forEach(ev => (ev==='focus'?window:document).addEventListener(ev, tTick));
+
+/* ================= Navigation, dialog, footer links ================= */
+const VIEWS = ['home','menu','focus','insights','history','profile','settings','subjects','tasks','notes','exams','planner','calendar','library','notifs','revision','habits','journal','qbank','slots','routine'];
+let curView = 'home', settingsFrom = 'home';
+function go(v, fromPop){
+  if(!VIEWS.includes(v)) v = 'home';
+  if(v==='settings' && curView!=='settings') settingsFrom = curView;
+  const changed = v!==curView; curView = v;
+  VIEWS.forEach(x => $('v-'+x).hidden = x!==v);
+  setHeader(v);
+  if(v==='revision'){ try{ renderRevision(); }catch(e){} }
+  if(v==='habits'){ try{ renderHabits(); }catch(e){} }
+  if(v==='journal'){ try{ renderJournal(true); }catch(e){} }
+  if(v==='qbank'){ try{ renderQBank(); }catch(e){} }
+  if(v==='slots'){ try{ renderSlots(); }catch(e){} }
+  if(v==='routine'){ try{ renderRoutine(); }catch(e){} }
+  if(v==='home'){ try{ renderDayPlan(); updBell(); }catch(e){} }
+  document.querySelectorAll('.nav button').forEach(b => b.setAttribute('aria-current', b.dataset.v===v ? 'page' : 'false'));
+  window.scrollTo(0,0);
+  if(!fromPop && changed){ try{ history.pushState({v}, '', '#/'+v); }catch(e){} }
+}
+function goBack(){ if(history.state && history.state.v==='settings'){ try{ history.back(); return; }catch(e){} } go(settingsFrom || 'home'); }
+try{ history.replaceState({v:'home'}, ''); }catch(e){}
+window.addEventListener('popstate', () => go(hashView(), true));
+
+$('menuBack').onclick = () => { if(history.state && history.state.v === 'menu'){ try{ history.back(); return; }catch(e){} } go('home'); };
+$('menuLogout').onclick = () => $('logoutBtn').click();
+$('setProf').onclick = () => go('profile');
+$('pIns').onclick = () => go('insights');
+$('setLogout').onclick = () => $('logoutBtn').click();
+/* ================= Profile (per-account key; study data untouched) ================= */
+const initials = n => n.split(/\s+/).filter(Boolean).slice(0,2).map(w => Array.from(w)[0].toUpperCase()).join('');
+const cleanName = v => v.replace(/\s+/g,' ').trim();
+
+Object.assign(I18N.en,{"home.setTgt":"Set your daily target","home.setTgtD":"How many hours do you want to study each day?","home.hrs":"hours","home.note0":"Even a short session counts. Start small and keep going.","home.note1":"You are moving forward. Keep your focus steady.","home.note2":"Today's target is complete. Well done, and rest well too.","prof.age":"Age","prof.school":"School / college name","prof.gender":"Gender","prof.email":"Email","prof.hobby":"Hobbies","prof.details":"Personal details","prof.genNone":"Not set","prof.genM":"Male","prof.genF":"Female","prof.genO":"Other","prof.genX":"Prefer not to say","prof.visHint":"Tick a detail to show it on your profile.","prof.detNone":"Add your details with Edit profile. Only the details you tick are shown.","prof.ageErr":"Enter an age from 1 to 120.","prof.emailErr":"Enter a valid email address."});
+Object.assign(I18N.bn,{"home.setTgt":"দৈনিক লক্ষ্য ঠিক করুন","home.setTgtD":"প্রতিদিন কত ঘণ্টা পড়তে চান?","home.hrs":"ঘণ্টা","home.note0":"একটু সময় পড়লেও তা গোনা হয়। ছোট করে শুরু করুন, তারপর এগিয়ে যান।","home.note1":"আপনি এগোচ্ছেন। মনোযোগ ধীরে ধীরে ধরে রাখুন।","home.note2":"আজকের লক্ষ্য পূরণ হয়েছে। দারুণ! এবার একটু বিশ্রামও নিন।","prof.age":"বয়স","prof.school":"স্কুল / কলেজের নাম","prof.gender":"লিঙ্গ","prof.email":"ইমেইল","prof.hobby":"শখ","prof.details":"ব্যক্তিগত তথ্য","prof.genNone":"লেখা নেই","prof.genM":"পুরুষ","prof.genF":"নারী","prof.genO":"অন্যান্য","prof.genX":"বলতে চাই না","prof.visHint":"যে তথ্য প্রোফাইলে দেখাতে চান সেটি টিক দিন।","prof.detNone":"Edit profile থেকে তথ্য যোগ করুন। যেগুলো টিক দেবেন শুধু সেগুলোই দেখানো হবে।","prof.ageErr":"১ থেকে ১২০ এর মধ্যে বয়স লিখুন।","prof.emailErr":"সঠিক ইমেইল ঠিকানা লিখুন।"});
+/* ================= Profile: details stored in the profile record (info + per-field visibility) ================= */
+const PDI={phone:'<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/>',pin:'<path d="M12 21s-6-5.5-6-11a6 6 0 0 1 12 0c0 5.5-6 11-6 11z"/><circle cx="12" cy="10" r="2.2"/>',bldg:'<path d="M4 20h16M6 20V10l6-5 6 5v10M10 20v-5h4v5"/>',gen:'<circle cx="10" cy="14" r="5"/><path d="M14 10l6-6M15 4h5v5"/>',cake:'<path d="M5 21v-8h14v8M4 13h16M8 10V8M12 10V6M16 10V8"/>',mail:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/>',cap:'<path d="M3 9l9-4 9 4-9 4z"/><path d="M7 11v4c2 2 8 2 10 0v-4"/>',lay:'<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>',clk:'<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>',book:'<path d="M4 5a2 2 0 0 1 2-2h12v16H6a2 2 0 0 0-2 2z"/>',flag:'<path d="M5 21V4M5 4h11l-2 4 2 4H5"/>',hobby:'<rect x="4" y="4" width="7" height="7" rx="1.5"/><circle cx="16.5" cy="7.5" r="3.5"/><path d="M4 20l3.5-6 3.5 6z"/><circle cx="16.5" cy="17" r="3.5"/>',pen:'<path d="M4 20l4-1 11-11-3-3L5 16z"/>'};
+const pdSvg = p => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
+const PINFO = ['gender','dob','phone','email','address','hobby','school','college','uni','time','subjects','goal'];
+const PTIME = ['early','morn','aft','eve','night','vary'];
+const GENK = {male:'prof.genM', female:'prof.genF', other:'prof.genO', x:'prof.genX'};
+const SCLS = ['1','2','3','4','5','6','7','8','9','10'];
+const CCLS = ['11','12'];
+const ADDR_COUNTRIES = ["Australia", "Bahrain", "Bangladesh", "Bhutan", "Canada", "China", "Germany", "India", "Indonesia", "Italy", "Japan", "Kuwait", "Malaysia", "Maldives", "Myanmar", "Nepal", "Netherlands", "Oman", "Pakistan", "Philippines", "Qatar", "Saudi Arabia", "Singapore", "South Africa", "South Korea", "Spain", "Sri Lanka", "Thailand", "United Arab Emirates", "United Kingdom", "United States"];
+/* Bangladesh: division and district lists (8 divisions, 64 districts). Other countries use free text. */
+const BD_DIV = {
+  "Dhaka": ["Dhaka","Faridpur","Gazipur","Gopalganj","Kishoreganj","Madaripur","Manikganj","Munshiganj","Narayanganj","Narsingdi","Rajbari","Shariatpur","Tangail"],
+  "Chattogram": ["Bandarban","Brahmanbaria","Chandpur","Chattogram","Cumilla","Cox's Bazar","Feni","Khagrachhari","Lakshmipur","Noakhali","Rangamati"],
+  "Rajshahi": ["Bogura","Joypurhat","Naogaon","Natore","Chapainawabganj","Pabna","Rajshahi","Sirajganj"],
+  "Khulna": ["Bagerhat","Chuadanga","Jashore","Jhenaidah","Khulna","Kushtia","Magura","Meherpur","Narail","Satkhira"],
+  "Barishal": ["Barguna","Barishal","Bhola","Jhalokati","Patuakhali","Pirojpur"],
+  "Sylhet": ["Habiganj","Moulvibazar","Sunamganj","Sylhet"],
+  "Rangpur": ["Dinajpur","Gaibandha","Kurigram","Lalmonirhat","Nilphamari","Panchagarh","Rangpur","Thakurgaon"],
+  "Mymensingh": ["Jamalpur","Mymensingh","Netrokona","Sherpur"]
+};
+function profRaw(){ try{ const o = JSON.parse(localStorage.getItem(NKEY)||'{}'); return (o && typeof o === 'object') ? o : {}; }catch(e){ return {}; } }
+const pClean = (v, n) => typeof v === 'string' ? v.replace(/\s+/g,' ').trim().slice(0, n) : '';
+/* Every value is cleaned on read, so a damaged record can never break the page */
+function ageFrom(s){ const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s||'')); if(!m) return null;
+  const b = new Date(+m[1], +m[2]-1, +m[3]), t = new Date(); let a = t.getFullYear() - b.getFullYear();
+  if(t.getMonth() < b.getMonth() || (t.getMonth() === b.getMonth() && t.getDate() < b.getDate())) a--;
+  return a >= 0 ? a : null; }
+function validDob(s){ const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s||'')); if(!m) return false;
+  const y = +m[1], mo = +m[2], d = +m[3], dt = new Date(y, mo-1, d);
+  if(dt.getFullYear() !== y || dt.getMonth() !== mo-1 || dt.getDate() !== d) return false;
+  if(dt > new Date()) return false;
+  const a = ageFrom(s); return a !== null && a <= 120; }
+function fmtDob(s){ const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s||'')); if(!m) return '';
+  return new Date(+m[1], +m[2]-1, +m[3]).toLocaleDateString(langNow() === 'en' ? 'en-GB' : 'bn-BD', {day:'numeric', month:'short', year:'numeric'}); }
+function addrFormat(a){ return [a.village, a.district, a.division, a.country].filter(Boolean).join(', '); }
+function profInfo(){
+  const o = profRaw(), i = (o.info && typeof o.info === 'object') ? o.info : {}, v = (o.vis && typeof o.vis === 'object') ? o.vis : {};
+  let school = pClean(i.school,80), college = pClean(i.college,80), uni = pClean(i.uni,80);
+  /* Older records kept one "level" and one institution name: move that name to the matching stage */
+  if(i.level && i.level !== 'school' && i.school && i.college === undefined && i.uni === undefined){
+    if(i.level === 'college') college = school; else uni = school; school = ''; }
+  const info = {
+    dob: validDob(i.dob) ? i.dob : '', gender: ['male','female','other','x'].includes(i.gender) ? i.gender : '',
+    phone: pClean(i.phone,20), email: pClean(i.email,60),
+    country: pClean(i.country,60), division: pClean(i.division,60), district: pClean(i.district,60), village: pClean(i.village,120),
+    school, schoolClass: SCLS.includes(i.schoolClass) ? i.schoolClass : '',
+    college, collegeClass: CCLS.includes(i.collegeClass) ? i.collegeClass : '',
+    uni, field: pClean(i.field,60), year: pClean(i.year,40),
+    time: PTIME.includes(i.time) ? i.time : '',
+    subjects: Array.isArray(i.subjects) ? i.subjects.filter(s => typeof s === 'string' && s.trim()).map(s => s.trim().slice(0,30)).slice(0,12) : [],
+    goal: pClean(i.goal,140), hobby: pClean(i.hobby,60)
+  };
+  return { info, vis: Object.fromEntries(PINFO.map(k => [k, v[k] === true])) };   /* hidden unless the user switches it on */
+}
+function saveProfInfo(info, vis){ const o = profRaw(); o.info = info; o.vis = vis; try{ localStorage.setItem(NKEY, JSON.stringify(o)); return true; }catch(e){ toast(tr('v.storage')); return false; } }
+function paintSubjPick(sel){
+  const box = $('eSubjects');
+  if(!state.subjects.length){ box.innerHTML = `<p class="small pf-none">${esc(tr('prof.subjNone'))}</p>`; return; }
+  box.innerHTML = state.subjects.map(s => { const on = sel.includes(s); return `<label class="pf-chip${on?' on':''}"><input type="checkbox" value="${esc(s)}"${on?' checked':''}><span>${esc(s)}</span></label>`; }).join('');
+}
+function bnNum(v){ return langNow() === 'bn' ? String(v).replace(/[0-9]/g, d => '০১২৩৪৫৬৭৮৯'[+d]) : String(v); }
+function paintClassOpts(){ ['eSchoolCls','eCollegeCls'].forEach(id => Array.from($(id).options).forEach(o => { if(o.value) o.textContent = tr('pi.classN', {n: bnNum(o.value)}); })); }
+function countFields(){ $('bioCount').textContent = `${$('editBio').value.length}/160`; $('goalCount').textContent = `${$('eGoal').value.length}/140`; }
+/* Living address: country, then division and district (lists for Bangladesh, text for others), then the village/road/house line */
+function fillDivSel(div){ $('eDiv').innerHTML = `<option value="">${esc(tr('pi.pickDiv'))}</option>` + Object.keys(BD_DIV).map(d => `<option value="${esc(d)}"${d===div?' selected':''}>${esc(d)}</option>`).join(''); }
+function fillDistSel(div, dist){ const list = Object.prototype.hasOwnProperty.call(BD_DIV, div) ? BD_DIV[div] : [];
+  $('eDist').innerHTML = `<option value="">${esc(tr('pi.pickDist'))}</option>` + list.map(d => `<option value="${esc(d)}"${d===dist?' selected':''}>${esc(d)}</option>`).join(''); }
+function syncAddrVis(){ const c = $('eCountry').value, bd = c === 'Bangladesh', chosen = !!c;
+  $('eCountryTxt').hidden = c !== 'Other'; $('eDiv').hidden = !bd; $('eDist').hidden = !bd;
+  $('eDivTxt').hidden = bd || !chosen; $('eDistTxt').hidden = bd || !chosen; paintAddrOut(); }
+function readAddr(){ const c = $('eCountry').value, bd = c === 'Bangladesh'; let division = '', district = '';
+  if(bd){ division = Object.prototype.hasOwnProperty.call(BD_DIV, $('eDiv').value) ? $('eDiv').value : '';
+    district = division && BD_DIV[division].includes($('eDist').value) ? $('eDist').value : ''; }
+  else { division = pClean($('eDivTxt').value,60); district = pClean($('eDistTxt').value,60); }
+  return { country: c === 'Other' ? pClean($('eCountryTxt').value,60) : c, division, district, village: pClean($('eVillage').value,120) }; }
+function paintAddrOut(){ const t = addrFormat(readAddr()); $('eAddrOut').textContent = t ? `${tr('pi.addrShown')} ${t}` : ''; }
+function fillAddrForm(I){ const known = ADDR_COUNTRIES.includes(I.country);
+  $('eCountry').value = known ? I.country : (I.country ? 'Other' : '');
+  $('eCountryTxt').value = known ? '' : I.country;
+  $('eVillage').value = I.village; $('eDivTxt').value = I.division; $('eDistTxt').value = I.district;
+  const bd = I.country === 'Bangladesh';
+  fillDivSel(bd ? I.division : ''); fillDistSel(bd ? I.division : '', bd ? I.district : '');
+  syncAddrVis(); }
+function fillProfForm(){
+  const p = profInfo(), I = p.info;
+  $('eDob').value = I.dob; $('ePhone').value = I.phone; $('eEmail').value = I.email; $('eGender').value = I.gender;
+  $('eSchool').value = I.school; $('eSchoolCls').value = I.schoolClass;
+  $('eCollege').value = I.college; $('eCollegeCls').value = I.collegeClass;
+  $('eUni').value = I.uni; $('eField').value = I.field; $('eYear').value = I.year;
+  $('eTime').value = I.time; $('eGoal').value = I.goal; $('eHobby').value = I.hobby;
+  paintClassOpts();
+  fillAddrForm(I);
+  paintSubjPick(I.subjects);
+  PINFO.forEach(k => { const c = $('v_' + k); if(c) c.checked = !!p.vis[k]; });
+  $('pfTgt').textContent = tr('prof.tgtVal', {h: +(state.settings.targetMin/60).toFixed(1)});
+  countFields();
+}
+function readProfForm(){
+  const dob = $('eDob').value, phone = $('ePhone').value.trim(), email = $('eEmail').value.trim(), subs = [...$('eSubjects').querySelectorAll('input:checked')].map(x => x.value);
+  const fail = (msg, el) => { $('editErr').textContent = msg; if(el) el.focus(); return null; };
+  if(dob && !validDob(dob)) return fail(tr('pi.dobErr'), $('eDob'));
+  if(phone && !/^\+?[0-9 ()-]{6,20}$/.test(phone)) return fail(tr('pi.phoneErr'), $('ePhone'));
+  if(email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail(tr('prof.emailErr'), $('eEmail'));
+  if(subs.length > 12) return fail(tr('prof.subjMax'), null);
+  const gd = $('eGender').value, tm = $('eTime').value, a = readAddr(), sc = $('eSchoolCls').value, cc = $('eCollegeCls').value;
+  const info = { dob, gender: ['male','female','other','x'].includes(gd) ? gd : '', phone: pClean(phone,20), email: email.slice(0,60),
+    country: a.country, division: a.division, district: a.district, village: a.village,
+    school: pClean($('eSchool').value,80), schoolClass: SCLS.includes(sc) ? sc : '',
+    college: pClean($('eCollege').value,80), collegeClass: CCLS.includes(cc) ? cc : '',
+    uni: pClean($('eUni').value,80), field: pClean($('eField').value,60), year: pClean($('eYear').value,40),
+    time: PTIME.includes(tm) ? tm : '', subjects: subs, goal: pClean($('eGoal').value,140), hobby: pClean($('eHobby').value,60) };
+  const vis = Object.fromEntries(PINFO.map(k => { const c = $('v_' + k); return [k, c ? c.checked : false]; }));
+  if(profRaw().reg){ const s = profInfo().info; ['dob','gender','phone','email','country','division','district','village'].forEach(k => { info[k] = s[k]; }); }
+  return { info, vis };
+}
+function paintHomeNote(){
+  const el = $('homeNote'); if(!el || !state || !state.settings) return;
+  const tgt = state.settings.targetMin || 0, tm = state.entries[today()] || 0;
+  el.textContent = tr(!tm ? 'home.note0' : (tm >= tgt ? 'home.note2' : 'home.note1'));
+}
+function profBio(){ try{ return String(JSON.parse(localStorage.getItem(NKEY)||'{}').bio||''); }catch(e){ return ''; } }
+function saveProfile(name, pic, bio, cover){ const b = bio===undefined ? profBio() : bio, c = cover===undefined ? profCover() : cover; try{ localStorage.setItem(NKEY, JSON.stringify(Object.assign(profRaw(), {name, pic: pic||'', bio: b, cover: c||''}))); }catch(e){ toast(tr('v.storage')); return false; } prof = {name, pic: pic||'', cover: c||''}; profName = name; return true; }
+/* Progress is shown only for achievements whose underlying number exists in stats() */
+const ACHP = {'First Hour':[x=>x.total,60,'m'],'50 Hours':[x=>x.total,3000,'m'],'100 Hours':[x=>x.total,6000,'m'],'7 Day Streak':[x=>x.longest,7,'d'],'30 Day Streak':[x=>x.longest,30,'d']};
+function achTile(a, x){
+  const on = a[3](x), p = ACHP[a[1]], cur = p ? Math.min(p[0](x), p[1]) : 0;
+  const bar = p && !on ? `<span class="pp-bar"><i style="width:${Math.round(cur / p[1] * 100)}%"></i></span><small>${p[2] === 'm' ? esc(dur(cur)) + ' / ' + esc(dur(p[1])) : esc(tr('prof.days', {n: cur, t: p[1]}))}</small>` : '';
+  return `<div class="pp-a${on ? ' on' : ''}"><span class="pp-aic">${a[0]}</span><div class="pp-at"><b>${esc(tr(ACHL[a[1]][0]))}</b><small>${esc(tr(ACHL[a[1]][1]))}</small>${bar}${on ? `<small class="pp-un">${esc(tr('prof.unlocked'))}</small>` : ''}</div></div>`;
+}
+function renderProfileExtras(x){ const bio = profBio(); $('profBioOut').textContent = bio; $('profBioOut').hidden = !bio;
+  const n = ACH.filter(a => a[3](x)).length; $('pAchCount').textContent = tr('prof.achCount',{n:n, t:ACH.length});
+  $('pAch').innerHTML = ACH.map(a => achTile(a, x)).join(''); }
+function paintAvatar(el, name, pic){
+  el.textContent = '';
+  if(pic){ const im = new Image(); im.alt = ''; im.src = pic; el.appendChild(im); } else el.textContent = initials(name);
+}
+function renderProfile(){ patchProfileLabels();
+  const has = !!profName;
+  document.body.classList.toggle('onboard', !has);
+  $('profSetup').hidden = has; $('profView').hidden = !has;
+  if(!has) return;
+  $('profNameOut').textContent = profName; paintAvatar($('avatar'), profName, prof.pic); paintCover(prof.cover); $('ppSettings').setAttribute('aria-label', tr('a.settings'));
+  const x = stats(); renderProfileExtras(x); renderProfInfo();
+  $('pGoal').textContent = dur(x.tgt);
+  $('pStreak').textContent = x.cur===1 ? tr('day.one') : tr('day.many',{n:x.cur});
+  $('pNotes').textContent = String(profNotesCount());
+  renderProfRecent();
+}
+/* PL (the notes store) is declared later in the script; renderProfile also runs once at startup, so read it defensively */
+function profNotesCount(){ try{ return PL.notes.length; }catch(e){ return 0; } }
+/* Profile: the three most recent sessions, straight from stored data */
+function renderProfRecent(){
+  const box = $('pRecList'); if(!box || !state || !state.sessions) return;
+  const rec = state.sessions.slice(-3).reverse();
+  box.innerHTML = rec.length ? rec.map(z => {
+    const when = z.start ? (() => { const d = new Date(z.start); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; })() : '';
+    return `<div class="pf-rs"><div class="pf-rs-main"><b>${esc(z.sub || tr('sub.none'))}</b><small>${esc(short(z.date))}${when ? ', '+when : ''}</small></div><b class="pf-rs-dur">${esc(dur(z.min))}</b></div>`;
+  }).join('') : `<p class="pf-none small">${esc(tr('hm.recentNone'))}</p>`;
+}
+/* Unsaved-changes guard: snapshot of the edit form taken when it opens */
+let profSnap = '';
+function profFormSnap(){ return Array.from($('editForm').querySelectorAll('input,select,textarea')).map(e => e.type==='checkbox' ? (e.checked?1:0) : e.value).join('\u0001') + '|' + String(pendingPic) + '|' + String(pendingCover); }
+let pendingPic;
+const REG_LOCK = ['editName','eDob','ePhone','eEmail','eGender','eCountry','eCountryTxt','eDiv','eDist','eDivTxt','eDistTxt','eVillage'];
+const LOCK_SVG = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>';
+function paintRegLock(){ const on = !!profRaw().reg;
+  REG_LOCK.forEach(id => { const el = $(id), row = el && el.closest('.fbe-row'); if(!row) return;
+    if(el.tagName === 'INPUT') el.readOnly = on;
+    el.style.pointerEvents = on ? 'none' : ''; el.tabIndex = on ? -1 : 0;
+    row.dataset.locked = on ? '1' : '';
+    const pen = row.querySelector('.fbe-pen');
+    if(pen){ if(pen.dataset.pen === undefined) pen.dataset.pen = pen.innerHTML; pen.innerHTML = on ? LOCK_SVG : pen.dataset.pen; } }); }
+const LOCK_MSG = "This can't be changed. Only the school name can be updated.";
+const lockHit = t => !!(t.closest && t.closest('.fbe-row[data-locked="1"]') && !t.closest('.fbe-vis'));
+document.addEventListener('pointerdown', e => { if(lockHit(e.target)) e.preventDefault(); }, true);
+document.addEventListener('click', e => { if(!lockHit(e.target)) return; e.preventDefault(); e.stopPropagation(); toast(LOCK_MSG, 3000); }, true);
+function openEdit(on){ pendingPic = undefined; pendingCover = undefined; $('editForm').hidden = !on; $('profEdit').hidden = on; $('editErr').textContent = '';
+  if(on){ $('editName').value = profName; $('editBio').value = profBio(); fillProfForm(); paintRegLock(); $('picRm').hidden = !prof.pic; $('coverRm').hidden = !prof.cover; } else renderProfile(); }
+$('setupForm').onsubmit = e => { e.preventDefault(); const v = cleanName($('setupName').value); if(!v){ $('setupErr').textContent = tr('prof.empty'); $('setupName').focus(); return; }
+  $('setupErr').textContent = ''; if(!saveProfile(v, '')) return; renderProfile(); render(); go('home'); };
+$('editForm').onsubmit = e => { e.preventDefault(); const v = profRaw().reg ? profName : cleanName($('editName').value); if(!v){ $('editErr').textContent = tr('prof.empty'); $('editName').focus(); return; }
+  const ex = readProfForm(); if(!ex) return;
+  if(!saveProfile(v, pendingPic===undefined ? prof.pic : pendingPic, $('editBio').value.replace(/\s+/g,' ').trim().slice(0,160), pendingCover===undefined ? prof.cover : pendingCover)) return; if(!saveProfInfo(ex.info, ex.vis)) return; openEdit(false); render(); toast(tr('prof.saved')); };
+$('profEdit').onclick = () => openEdit(true);
+$('editCancel').onclick = async () => { if(profFormSnap() !== profSnap && !(await ask(tr('prof.unsaved'), tr('prof.discard')))) return; openEdit(false); };
+$('picBtn').onclick = () => $('picIn').click();
+$('picIn').onchange = async e => { const f = e.target.files[0]; e.target.value = ''; if(!f) return;
+  try{ pePic = await imgFromFile(f); openPhotoEditor(); }catch(err){ toast(tr('prof.photoErr')); } };
+$('picRm').onclick = () => { pendingPic = ''; paintAvatar($('avatar'), profName, ''); $('picRm').hidden = true; };
+/* Cover photo: a wide crop stored with the profile, like the avatar */
+let pendingCover;
+function profCover(){ try{ return String(JSON.parse(localStorage.getItem(NKEY)||'{}').cover||''); }catch(e){ return ''; } }
+function paintCover(src){ const v = src || '', img = $('pCoverImg');
+  if(v){ img.src = v; img.hidden = false; } else { img.removeAttribute('src'); img.hidden = true; }
+  $('pCover').classList.toggle('has', !!v); $('pCoverTxt').textContent = tr(v ? 'prof.coverChange' : 'prof.coverBtn'); }
+$('pCoverBtn').onclick = () => { openEdit(true); $('coverIn').click(); };
+$('coverBtn').onclick = () => $('coverIn').click();
+$('coverIn').onchange = async e => { const f = e.target.files[0]; e.target.value = ''; if(!f) return;
+  try{ pendingCover = await readCover(f); paintCover(pendingCover); $('coverRm').hidden = false; $('editErr').textContent = ''; }catch(err){ $('editErr').textContent = tr('prof.coverErr'); } };
+$('coverRm').onclick = () => { pendingCover = ''; paintCover(''); $('coverRm').hidden = true; };
+$('pGoalLink').onclick = () => go('settings');
+$('pRecAll').onclick = () => go('history');
+$('ppSettings').onclick = () => go('settings');
+/* ---- login password for Google accounts: adds Email & Password to the SAME Firebase user (same UID, same data, no new account) ---- */
+const PW_RULE = /^(?=.*[A-Za-z])(?=.*\d).{6,64}$/;
+const pwHasProv = (u, id) => !!u && (u.providerData || []).some(p => p && p.providerId === id);
+const pwPaint = u => { const can = !!u && pwHasProv(u, 'google.com') && !pwHasProv(u, 'password');
+  $('pwSetBtn').hidden = !can; if(!can) $('pwCard').hidden = true; };
+fbAuth.onAuthStateChanged(pwPaint);
+const pwScore = p => { let s = 0; if(p.length >= 8) s++; if(p.length >= 12) s++; if(/[a-z]/.test(p) && /[A-Z]/.test(p)) s++; if(/\d/.test(p) && /[^A-Za-z0-9]/.test(p)) s++; return Math.max(1, s); };
+const pwMeter = () => { const p = $('pwNew').value, s = p ? pwScore(p) : 0;
+  $('pwBar').style.width = (s * 25) + '%';
+  $('pwHint').textContent = !p ? '' : !PW_RULE.test(p) ? tr('pw.rule') : tr(['', 'pw.s1', 'pw.s2', 'pw.s3', 'pw.s4'][s]); };
+const pwFail = m => { $('pwErr').textContent = m; };
+const pwErrOf = x => { const c = (x && x.code) || '';
+  if(c === 'auth/weak-password') return tr('pw.rule');
+  if(c === 'auth/credential-already-in-use' || c === 'auth/email-already-in-use') return tr('pw.inUse');
+  if(c === 'auth/requires-recent-login') return tr('pw.recent');
+  if(c === 'auth/too-many-requests') return tr('pw.many');
+  return tr('pw.net') + (c ? ' (' + c + ')' : ''); };
+const pwClear = () => { $('pwNew').value = ''; $('pwNew2').value = ''; $('pwNew').type = 'password'; $('pwNew2').type = 'password';
+  $('pwEye').textContent = tr('pw.show'); $('pwErr').textContent = ''; pwMeter(); };
+$('pwSetBtn').onclick = () => { $('pwCard').hidden = false; $('pwNew').focus(); };
+$('pwCancel').onclick = () => { pwClear(); $('pwCard').hidden = true; };
+$('pwNew').addEventListener('input', pwMeter);
+$('pwEye').onclick = () => { const t = $('pwNew').type === 'password' ? 'text' : 'password';
+  $('pwNew').type = t; $('pwNew2').type = t; $('pwEye').textContent = tr(t === 'text' ? 'pw.hide' : 'pw.show'); };
+$('pwForm').onsubmit = async e => { e.preventDefault(); $('pwErr').textContent = '';
+  const user = fbAuth.currentUser, p1 = $('pwNew').value, p2 = $('pwNew2').value;
+  if(!user || !user.email || !pwHasProv(user, 'google.com')) { pwFail(tr('pw.noUser')); return; }
+  if(!PW_RULE.test(p1)) { pwFail(tr('pw.rule')); return; }
+  if(p1 !== p2) { pwFail(tr('pw.mismatch')); return; }
+  $('pwSave').disabled = true;
+  try{
+    const res = await user.linkWithCredential(firebase.auth.EmailAuthProvider.credential(user.email, p1));
+    pwClear(); $('pwCard').hidden = true; pwPaint(res.user); toast(tr('pw.done'));
+  }catch(x){ pwFail(pwErrOf(x)); }
+  finally{ $('pwSave').disabled = false; }
+};
+$('logoutBtn').onclick = async () => {
+  if(!(await ask(tr('acct.confirm'), tr('acct.logout')))) return;
+  ACC.reg.active = null; if(!ACC.write(ACC.reg)){ toast(tr('v.storage')); return; }
+  try{ await fbAuth.signOut(); }catch(e){}
+  location.reload(); };
+Object.assign(I18N.en,{"prof.sub":"Manage your account and track your progress.","prof.notes":"Notes","prof.insTitle":"View detailed stats","prof.insSub":"See your study insights and progress.","prof.startFocus":"Start a session in Focus","prof.days":"{n} / {t} days","prof.unlocked":"Unlocked"});
+Object.assign(I18N.bn,{"prof.sub":"আপনার অ্যাকাউন্ট দেখুন ও অগ্রগতি ট্র্যাক করুন।","prof.notes":"নোট","prof.insTitle":"বিস্তারিত পরিসংখ্যান দেখুন","prof.insSub":"আপনার পড়াশোনার অন্তর্দৃষ্টি ও অগ্রগতি দেখুন।","prof.startFocus":"Focus থেকে একটি সেশন শুরু করুন","prof.days":"{n} / {t} দিন","prof.unlocked":"অর্জিত"});
+Object.assign(I18N.en,{"prof.coverBtn":"Add cover photo","prof.coverChange":"Change cover","prof.coverChoose":"Choose cover photo","prof.coverRm":"Remove cover","prof.coverHint":"A wide photo shown at the top of your profile.","prof.coverErr":"Could not read that image."});
+Object.assign(I18N.bn,{"prof.coverBtn":"কভার ছবি যোগ করুন","prof.coverChange":"কভার বদলান","prof.coverChoose":"কভার ছবি বাছুন","prof.coverRm":"কভার সরান","prof.coverHint":"আপনার প্রোফাইলের উপরে দেখানো একটি প্রশস্ত ছবি।","prof.coverErr":"ছবিটি পড়া যায়নি।"});
+initThemeUI(); paintThemeUI();
+document.querySelector('.nav').onclick = e => { const b = e.target.closest('button'); if(b && b.dataset.v) go(b.dataset.v); };
+$('setBack').onclick = () => { if(setCatCur){ setBackFromCat(); return; } goBack(); };
+renderProfile(); if(!profName) go('profile');
+$('startFocus').onclick = () => { go('focus'); if(!T.run){ if(T.phase==='break') tSet('focus'); $('tStart').click(); } };
+/* Confirmation dialog (replaces browser confirm) */
+function ask(msg, ok){
+  return new Promise(res => { const d = $('dlg'); $('dlgMsg').textContent = msg; $('dlgOk').textContent = ok || tr('dlg.ok');
+    d.returnValue = ''; d.onclose = () => { $('dlgMsg').textContent = ''; res(d.returnValue==='ok'); }; d.showModal(); });
+}
+/* Social links: paste each URL between the quotes. Entries left empty stay greyed out until a link is added. */
+const SOCIALS = [['Facebook',''],['Instagram',''],['YouTube',''],['LinkedIn',''],['GitHub',''],['X',''],['WhatsApp',''],['Website','']];
+$('soc').innerHTML = SOCIALS.filter(x=>x[1]).map(x=>`<a href="${esc(x[1])}" target="_blank" rel="noopener">${x[0]}</a>`).join('');
+
+/* Another tab changed the data: reload it instead of overwriting it later */
+window.addEventListener('storage', e => {
+  if(e.key!==KEY || LOCKED || !e.newValue) return;
+  try{ state = checkData(JSON.parse(e.newValue), true); rebuild(); render(); }catch(err){}
+});
+
+/* ================= Init ================= */
+
+// href="#" (লিংক বসানো হয়নি) হলে ক্লিকে পেজ উপরে লাফ দেবে না
+document.querySelectorAll('.soc a').forEach(a => a.addEventListener('click', e => { if(a.getAttribute('href')==='#') e.preventDefault(); }));
+$('dateIn').max = today();
+checkAch(false);
+applyStatic(); resetForm(); syncTimerPrefs(); applyMode(); syncPrefs(); T.left = tFull(); tShow(); tRestore();
+setTimeout(() => render(), 150);   // progress bar-এর load animation
+// Refresh when the day changes while the app stays open
+setInterval(()=>{ if($('dateIn').max !== today()){ $('dateIn').max = today(); resetForm(); } }, 60000);
+/* Keep the bottom bar above the on-screen keyboard on iOS */
+if(window.visualViewport){ const vv = visualViewport, syncKb = () => document.documentElement.style.setProperty('--kb', Math.max(0, Math.round(innerHeight - vv.height - vv.offsetTop)) + 'px'); vv.addEventListener('resize', syncKb); vv.addEventListener('scroll', syncKb); }
+/* ================= page header, Profile settings entry ================= */
+function setHeader(v){
+  const h = $('hdrTitle'); if(!h) return;
+  const names = {menu:'more.menu',focus:'nav.focus', insights:'nav.insights', history:'nav.history', profile:'nav.profile', exams:'nav.exams', planner:'nav.planner', calendar:'nav.calendar', library:'nav.library', notifs:'nav.notifs', revision:'nav.revision', habits:'nav.habits', journal:'nav.journal', qbank:'nav.qbank', slots:'nav.slots', routine:'nav.routine'};
+  h.textContent = v === 'home' ? tr('app.title') : (names[v] ? tr(names[v]) : '');
+  document.body.dataset.view = v;
+}
+function patchProfileLabels(){
+  const b = $('profSettings'); if(!b) return;
+  b.querySelector('.sc-b').textContent = 'Settings';
+}
+
+setHeader(curView);
+
+let setCatCur = null, setDashY = 0;
+/* Back from an option returns to the list at the same place the option was opened from */
+function setBackFromCat(){ const k = setCatCur; setCat(null); window.scrollTo(0, setDashY); const b = k && document.querySelector('#setDash [data-open="' + k + '"]'); if(b) b.focus({preventScroll:true}); }
+function setCat(c){ if(c && !setCatCur) setDashY = window.scrollY; setCatCur = c || null; const d = $('setDash'); if(d) d.hidden = !!c; document.querySelectorAll('#v-settings [data-sec]').forEach(el => { el.hidden = el.dataset.sec !== c; }); if(c === 'data') showStorageUse(); window.scrollTo(0,0); }
+function showStorageUse(){ try{ let n = 0; for(let i = 0; i < localStorage.length; i++){ const k = localStorage.key(i); if(k && k.indexOf('studyTracker') === 0) n += (k.length + (localStorage.getItem(k) || '').length) * 2; } $('storeUse').textContent = tr('set.storeUse', {kb: (n / 1024).toFixed(1)}); }catch(e){ $('storeUse').textContent = ''; } }
+document.querySelectorAll('#setDash [data-open]').forEach(b => b.onclick = () => { const k = b.dataset.open; if(k === 'profile') go('profile'); else setCat(k); });
+setCat(null);
+/* ===== hash routing, menus, collapsible sidebar, Home extras ===== */
+const hashView = () => { const m = /^#\/(\w+)/.exec(location.hash); return m ? m[1] : 'home'; };
+function closePops(){ document.querySelectorAll('.pop').forEach(p => p.hidden = true);  }
+function togglePop(id, btn){ const p = $(id), open = p.hidden; closePops(); if(open){ p.hidden = false; btn.setAttribute('aria-expanded','true'); const f = p.querySelector('button'); if(f) f.focus(); } }
+
+
+/* [data-more] is the note card's 3-dot button: its popover is a .pop, so without this exception the same click would hide it straight away */
+document.addEventListener('click', e => { if(!e.target.closest('.pop,#moreBtn,#menuBtn,[data-more]')) closePops(); });
+document.addEventListener('keydown', e => { if(e.key==='Escape' && [...document.querySelectorAll('.pop')].some(p => !p.hidden)){ closePops(); } });
+document.querySelectorAll('.pop').forEach(p => p.addEventListener('click', e => { const b = e.target.closest('button'); if(!b) return; closePops();
+  if(b.dataset.go) go(b.dataset.go); else if(b.dataset.do==='export') $('expBtn').click(); else if(b.dataset.do==='import') $('impBtn').click(); else if(b.dataset.do==='theme') $('themeBtn').click(); }));
+document.addEventListener('click', e => { const b = e.target.closest('[data-go]'); if(!b) return; go(b.dataset.go); });
+function paintHdrAv(){ try{ paintAvatar($('setAv'), profName || '', prof.pic); $('setPn').textContent = profName || ''; }catch(e){} }
+const _rp = renderProfile; renderProfile = function(){ _rp.apply(this, arguments); paintHdrAv(); };
+paintHdrAv();
+try{ if(localStorage.getItem('studyTracker.navMini')==='1'){ document.body.classList.add('navmini'); $('navCol').setAttribute('aria-pressed','true'); } }catch(e){}
+$('navCol').onclick = () => { const on = document.body.classList.toggle('navmini'); $('navCol').setAttribute('aria-pressed', on); try{ localStorage.setItem('studyTracker.navMini', on?'1':'0'); }catch(e){} };
+document.querySelectorAll('[data-act]').forEach(b => b.onclick = () => { const a = b.dataset.act;
+  if(a==='focus') $('startFocus').click(); else if(a==='insights') go('insights');
+  else if(a==='log'){ const c = $('logCard'); c.scrollIntoView({behavior: matchMedia('(prefers-reduced-motion:reduce)').matches?'auto':'smooth', block:'center'}); $('hIn').focus({preventScroll:true}); } });
+function homeExtras(){
+  const sess = T.phase==='focus' && !!T.runId, c = $('contCard');
+  c.hidden = !sess; if(sess){ $('contSt').textContent = tr(T.run?'cont.running':'cont.paused'); $('contSub').textContent = T.sub || tr('sub.none'); }
+  $('homeEmpty').hidden = stats().total > 0 || sess;
+}
+$('contGo').onclick = () => { go('focus'); if(!T.run) $('tStart').click(); };
+const _go = go; go = function(v, fromPop){ _go(v, fromPop); if(v === 'settings') setCat(null); if(v === 'profile') renderProfile(); const more = ['profile','settings','subjects','insights','history'].includes(curView);
+  closePops(); if(curView==='home') homeExtras(); };
+const _rd = render; render = function(){ _rd(); homeExtras(); };
+window.addEventListener('hashchange', () => go(hashView(), true));
+if(location.hash) go(hashView(), true); else { const st = (document.body.dataset.start || 'home'); try{ history.replaceState({v:st}, '', '#/'+st); }catch(e){} go(st, true); }
+homeExtras();
+/* ===== Subjects, Tasks, Notes (own storage key per profile; study data untouched) ===== */
+const PLK = KEY + '.plan', PRI = ['high','med','low'], STS = ['todo','prog','done'], COLORS = ['#4b4fc2','#17806f','#b4233f','#b8741a','#2f7a57','#6d3fc4','#0b6bcb','#b83266'], ICONS = ['📘','🧪','⚛️','🧮','🌍','📖','💻','🎨','🎵','⚽','🧬','✏️'];
+/* ---- notifications: shared state (declared before any reminder code runs) ---- */
+let SW_REG = null, OS_ERR = '';
+const TASK_DEFAULT_HM = '08:00';   /* a task without its own time is reminded at this time on its due day */
+const NOTIF_DESTS = ['home','focus','insights','history','planner','tasks','exams','notes','calendar','library','notifs','settings','profile','subjects','revision','habits','journal','routine'];
+const SAFE_DEST = d => NOTIF_DESTS.includes(d) ? d : 'home';
+const rid = p => p + Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+const str = (v,n) => typeof v==='string' ? v.trim().slice(0,n) : '';
+const okDate = v => typeof v==='string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && !isNaN(new Date(v+'T00:00:00'));
+const okIso = v => typeof v==='string' && !isNaN(Date.parse(v));
+function cleanSub(x){ if(!x || typeof x!=='object') return null; const name = str(x.name,30); if(!name) return null; const t = Number(x.target);
+  return {id: str(x.id,40)||rid('b'), name, color: COLORS.includes(x.color)?x.color:COLORS[0], icon: ICONS.includes(x.icon)?x.icon:ICONS[0], desc: str(x.desc,200), target: t>=0&&t<=168?t:0, aliases: Array.isArray(x.aliases)?x.aliases.map(a=>str(a,30)).filter(Boolean).slice(0,20):[]}; }
+function cleanTask(x){ if(!x || typeof x!=='object') return null; const title = str(x.title,120); if(!title) return null; const e = Math.round(Number(x.est));
+  return {id: str(x.id,40)||rid('t'), title, desc: str(x.desc,600), sid: str(x.sid,40), due: okDate(x.due)?x.due:'', time: /^\d{2}:\d{2}$/.test(x.time||'')?x.time:'', pri: PRI.includes(x.pri)?x.pri:'med', st: STS.includes(x.st)?x.st:'todo', est: e>=1&&e<=1440?e:0, created: okIso(x.created)?x.created:new Date().toISOString(), done: okIso(x.done)?x.done:''}; }
+function cleanNote(x){ if(!x || typeof x!=='object') return null; const title = str(x.title,120), body = typeof x.body==='string' ? x.body.slice(0,100000) : ''; if(!title && !body.trim()) return null;
+  return {id: str(x.id,40)||rid('n'), title, body, sid: str(x.sid,40), tags: Array.isArray(x.tags)?[...new Set(x.tags.map(a=>str(a,24).toLowerCase()).filter(Boolean))].slice(0,12):[], pin: x.pin===true, created: okIso(x.created)?x.created:new Date().toISOString(), updated: okIso(x.updated)?x.updated:new Date().toISOString()}; }
+const PST = ['planned','prog','done','skip'];
+function cleanPlanItem(x){ if(!x || typeof x!=='object') return null; const title = str(x.title,120); if(!title || !isDate(x.date)) return null;
+  const tm = t => /^\d{2}:\d{2}$/.test(t||'') ? t : '', start = tm(x.start), end = tm(x.end);
+  if(!start || !end || end<=start) return null;
+  return {id: str(x.id,40)||rid('p'), title, sid: str(x.sid,40), tid: str(x.tid,40), date: x.date, start, end, desc: str(x.desc,600), pri: PRI.includes(x.pri)?x.pri:'med', st: PST.includes(x.st)?x.st:'planned', spent: isInt(x.spent,0,100000)?x.spent:0, created: okIso(x.created)?x.created:new Date().toISOString()}; }
+/* Only http and https links are accepted. Anything else (javascript:, data:, vbscript:, ftp:, credentials in the URL) is rejected */
+function cleanUrl(v){ let s = str(v,500); if(!s) return '';
+  const hasScheme = /^[a-z][a-z0-9+.-]*:/i.test(s) && !/^[a-z0-9.-]+:\d+([/?#]|$)/i.test(s);
+  if(!hasScheme) s = 'https://' + s;
+  let u; try{ u = new URL(s); }catch(e){ return null; }
+  if((u.protocol!=='https:' && u.protocol!=='http:') || !u.hostname || (!u.hostname.includes('.') && u.hostname!=='localhost') || u.username || u.password) return null;
+  return u.href; }
+const LIB_TYPE = ['link','tutorial','video','article','doc','book','ref','other'];
+/* A resource needs a title and at least a web address or a location. An unsafe address is dropped, but the resource is kept if it has a location */
+function cleanRes(x){ if(!x || typeof x!=='object') return null; const title = str(x.title,120); if(!title) return null;
+  const url = cleanUrl(x.url) || '', loc = str(x.loc,200);
+  if(!url && !loc) return null;
+  return {id: str(x.id,40)||rid('r'), title, type: LIB_TYPE.includes(x.type)?x.type:'link', url, loc, sid: str(x.sid,40), desc: str(x.desc,600), tags: Array.isArray(x.tags)?[...new Set(x.tags.map(t => str(t,24).toLowerCase()).filter(Boolean))].slice(0,8):[], fav: x.fav===true, date: isDate(x.date)?x.date:today(), created: okIso(x.created)?x.created:new Date().toISOString()}; }
+const NF_KINDS = ['task','exam','plan','goal','backup','revision','study','habit','dayplan','routine'], NF_DEST = {task:'tasks', exam:'exams', plan:'planner', goal:'home', backup:'settings', revision:'revision', study:'home', habit:'habits', dayplan:'home', routine:'routine'};
+function cleanNotif(x){ if(!x || typeof x!=='object') return null; const title = str(x.title,120); if(!title) return null;
+  const kind = NF_KINDS.includes(x.kind) ? x.kind : 'task';
+  return {id: str(x.id,40)||rid('f'), kind, title, msg: str(x.msg,300), at: (typeof x.at==='string' && !isNaN(Date.parse(x.at))) ? x.at : new Date().toISOString(), read: x.read===true, key: str(x.key,120), dest: NF_DEST[kind], rid: str(x.rid,40)}; }
+/* ---- Revision Manager (Part 12). revSched = days between revisions; the first is measured from the day the topic was studied. ---- */
+const DEF_REV_SCHED = [1,3,7,15,30], REV_DIFF = ['easy','med','hard'];
+function cleanSched(a){ return (Array.isArray(a) && a.length >= 1 && a.length <= 10 && a.every(x => isInt(x,1,365))) ? a.slice(0,10) : DEF_REV_SCHED.slice(); }
+function cleanRev(x){ if(!x || typeof x!=='object') return null; const title = str(x.title,120); if(!title) return null;
+  return {id: str(x.id,40)||rid('r'), title, sid: str(x.sid,40), created: okIso(x.created)?x.created:new Date().toISOString(),
+    last: okDate(x.last)?x.last:'', next: okDate(x.next)?x.next:'', count: isInt(x.count,0,50)?x.count:0,
+    diff: REV_DIFF.includes(x.diff)?x.diff:'med', conf: isInt(x.conf,1,5)?x.conf:3, done: x.done===true}; }
+/* ---- Habit tracker (Part 13): log = completed dates (YYYY-MM-DD); t = optional reminder time ('' = off) ---- */
+function cleanHabit(x){ if(!x || typeof x !== 'object') return null; const name = str(x.name,80); if(!name) return null;
+  const log = Array.isArray(x.log) ? [...new Set(x.log.filter(d => okDate(d)))].sort().slice(-1000) : [];
+  return {id: str(x.id,40)||rid('h'), name, created: okIso(x.created)?x.created:new Date().toISOString(),
+    t: /^([01]\d|2[0-3]):[0-5]\d$/.test(x.t||'') ? x.t : '', log}; }
+/* ---- Study journal (Part 15): one entry per date; text fields, minutes studied, productivity 1-5 (0 = not rated) ---- */
+function cleanJournalList(a){ const byDate = {};
+  (Array.isArray(a) ? a : []).forEach(x => { if(!x || typeof x !== 'object' || !okDate(x.date)) return;
+    byDate[x.date] = {id: str(x.id,40)||rid('j'), date: x.date, read: str(x.read,600), learned: str(x.learned,600), hard: str(x.hard,600),
+      mistakes: str(x.mistakes,600), tomorrow: str(x.tomorrow,600), mins: isInt(x.mins,0,1440) ? x.mins : 0, prod: isInt(x.prod,1,5) ? x.prod : 0}; });
+  return Object.values(byDate).sort((p,q) => p.date < q.date ? -1 : 1).slice(-3000); }
+/* ---- Question bank (Part 16). type: mcq | short | broad | math. mcq has 4 options and ansIdx (1-4); others have a model answer. ---- */
+const Q_TYPES = ['mcq','short','broad','math'], Q_DIFFS = ['easy','med','hard'];
+function cleanQ(x){ if(!x || typeof x !== 'object') return null; const q = str(x.q,500); if(!q) return null;
+  const type = Q_TYPES.includes(x.type) ? x.type : 'short', diff = Q_DIFFS.includes(x.diff) ? x.diff : 'med';
+  const opts = type === 'mcq' ? (Array.isArray(x.opts) ? x.opts : []).slice(0,4).map(o => str(o,200)) : [];
+  if(type === 'mcq' && (opts.length !== 4 || opts.some(o => !o))) return null;
+  return {id: str(x.id,40)||rid('q'), q, sid: str(x.sid,40), topic: str(x.topic,80), type, diff, opts,
+    ansIdx: type === 'mcq' ? (isInt(x.ansIdx,1,4) ? x.ansIdx : 1) : 0, ans: type === 'mcq' ? '' : str(x.ans,500),
+    expl: str(x.expl,500), tags: str(x.tags,200), fav: x.fav === true,
+    tries: isInt(x.tries,0,100000) ? x.tries : 0, wrong: isInt(x.wrong,0,100000) ? x.wrong : 0,
+    created: okIso(x.created) ? x.created : new Date().toISOString()}; }
+/* ---- Time of day (optional): three parts: morning (m..a), afternoon & evening (a..n), night (n..m). Times are HH:MM, in order m < a < n. ---- */
+const SL_DEF = {m:'05:00', a:'12:00', n:'22:00'}, SL_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+const slMin = hm => Number(hm.slice(0,2)) * 60 + Number(hm.slice(3,5));
+function cleanSlotCfg(x){ if(!x || typeof x !== 'object') return {...SL_DEF};
+  const ok = SL_RE.test(x.m||'') && SL_RE.test(x.a||'') && SL_RE.test(x.n||'') && slMin(x.m) < slMin(x.a) && slMin(x.a) < slMin(x.n);
+  return ok ? {m: x.m, a: x.a, n: x.n} : {...SL_DEF}; }
+function cleanSlotNotes(a){ return (Array.isArray(a) ? a : []).map(x => {
+  if(!x || typeof x !== 'object' || !okDate(x.date) || !['m','a','n'].includes(x.slot)) return null;
+  const text = str(x.text, 400); return text ? {id: str(x.id,40) || rid('sn'), date: x.date, slot: x.slot, text} : null; }).filter(Boolean).slice(0,5000); }
+/* ---- Today's reading plan rows (one per subject per date) and the reminder time ---- */
+function cleanDayRows(a){ return (Array.isArray(a) ? a : []).map(x => {
+  if(!x || typeof x !== 'object' || !okDate(x.date)) return null;
+  const text = str(x.text, 300); if(!text) return null;
+  return {id: str(x.id,40) || rid('dp'), date: x.date, sid: str(x.sid,40), text, mins: isInt(x.mins,0,1440) ? x.mins : 0, done: x.done === true}; }).filter(Boolean).slice(-3000); }
+function cleanDayCfg(x){ if(!x || typeof x !== 'object' || typeof x.remAt !== 'string') return {remAt: '21:00'};
+  return {remAt: SL_RE.test(x.remAt) ? x.remAt : ''}; }
+/* ---- Study routine: name, start date, active switch, daily goal, and weekly blocks (study, break, other) ---- */
+function cleanRoutine(x){ const r = x && typeof x === 'object' ? x : {};
+  return { name: str(r.name, 80) || 'My Study Routine', start: okDate(r.start) ? r.start : '', active: r.active !== false,
+    goalMin: isInt(r.goalMin, 30, 960) ? r.goalMin : 480,
+    blocks: (Array.isArray(r.blocks) ? r.blocks : []).map(b => {
+      if(!b || typeof b !== 'object' || !isInt(b.wd, 0, 6) || !SL_RE.test(b.start || '') || !SL_RE.test(b.end || '') || slMin(b.end) <= slMin(b.start) || !['study','break','other'].includes(b.kind)) return null;
+      return {id: str(b.id, 40) || rid('rb'), wd: b.wd, start: b.start, end: b.end, kind: b.kind, sid: str(b.sid, 40), label: str(b.label, 80)}; }).filter(Boolean).slice(0, 500) }; }
+function cleanPlan(d){ let skipped = 0; const f = (a,fn) => (Array.isArray(a)?a:[]).map(x => { const r = fn(x); if(!r) skipped++; return r; }).filter(Boolean);
+  const dedupe = a => { const seen = new Set(); return a.filter(x => !seen.has(x.id) && seen.add(x.id)); };
+  return {plan:{v:1, subjects:dedupe(f(d&&d.subjects,cleanSub)).slice(0,100), tasks:dedupe(f(d&&d.tasks,cleanTask)).slice(0,5000), notes:dedupe(f(d&&d.notes,cleanNote)).slice(0,5000), exams:dedupe(f(d&&d.exams,cleanExam)).slice(0,1000), plans:dedupe(f(d&&d.plans,cleanPlanItem)).slice(0,5000), lib: dedupe(f(d&&d.lib,cleanRes)).slice(0,2000), revs: dedupe(f(d&&d.revs,cleanRev)).slice(0,5000), revSched: cleanSched(d&&d.revSched), habits: dedupe(f(d&&d.habits,cleanHabit)).slice(0,300), journal: cleanJournalList(d&&d.journal), qbank: (Array.isArray(d&&d.qbank) ? d.qbank : []).map(cleanQ).filter(Boolean).slice(0,3000), slotCfg: cleanSlotCfg(d&&d.slotCfg), slotNotes: cleanSlotNotes(d&&d.slotNotes), dayPlans: cleanDayRows(d&&d.dayPlans), dayPlanCfg: cleanDayCfg(d&&d.dayPlanCfg), routine: cleanRoutine(d&&d.routine), notif: dedupe(f(d&&d.notif,cleanNotif)).slice(0,300), nseen: (Array.isArray(d&&d.nseen)?d.nseen:[]).filter(x => typeof x==='string').map(x => x.slice(0,120)).slice(-800)}, skipped}; }
+let PL = {v:1, subjects:[], tasks:[], notes:[], exams:[], plans:[], lib:[], revs:[], revSched:[1,3,7,15,30], habits:[], journal:[], qbank:[], slotCfg:{m:'05:00',a:'12:00',n:'22:00'}, slotNotes:[], dayPlans:[], dayPlanCfg:{remAt:'21:00'}, routine:{name:'My Study Routine', start:'', active:true, goalMin:480, blocks:[]}, notif:[], nseen:[]};
+try{ const raw = localStorage.getItem(PLK); if(raw){ try{ PL = cleanPlan(JSON.parse(raw)).plan; }catch(e){ try{ localStorage.setItem(PLK+'.corrupt-'+Date.now(), raw); }catch(e2){} } } }catch(e){}
+function savePlan(){ try{ localStorage.setItem(PLK, JSON.stringify(PL)); return true; }catch(e){ toast(tr('c.storage')); return false; } }
+function importPlan(text){ try{ const d = JSON.parse(text); if(!d || !d.plan) return; const {plan, skipped} = cleanPlan(d.plan); let n = 0;
+  ['subjects','tasks','notes','exams','plans','lib','revs','habits','journal','qbank','slotNotes','dayPlans'].forEach(k => plan[k].forEach(r => { const i = PL[k].findIndex(x => x.id===r.id); if(i>=0) PL[k][i] = r; else PL[k].push(r); n++; if(k==='subjects') legacyName(r.name); }));
+  savePlan(); planRender(); toast(tr('plan.imp',{n}) + (skipped ? ' ' + tr('plan.skip',{n:skipped}) : '')); }catch(e){} }
+/* Managed subjects are linked to sessions by name; the plain-text list used by the timer and History is kept in step, never rewritten */
+function legacyName(name){ if(!state.subjects.includes(name) && state.subjects.length<100){ state.subjects.push(name); persist(); } }
+const lc = v => String(v).toLowerCase();
+const subNames = s => [s.name, ...s.aliases].map(lc);
+const subOf = id => PL.subjects.find(s => s.id===id);
+const fmtD = iso => new Date(iso).toLocaleDateString(langNow()==='bn'?'bn-BD':'en-GB', {day:'numeric', month:'short', year:'numeric'});
+const isoDay = d => d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
+const subSel = (name, cur, all) => `<select name="${name}" id="${name}F">${all?`<option value="">${esc(tr('c.allSubj'))}</option>`:`<option value="">${esc(tr('c.noSubj'))}</option>`}${PL.subjects.map(s=>`<option value="${esc(s.id)}"${s.id===cur?' selected':''}>${esc(s.icon+' '+s.name)}</option>`).join('')}</select>`;
+const fld = (label, inner) => `<div class="fld"><label>${esc(label)}</label>${inner}</div>`;
+const optSel = (name, pairs, cur) => `<select name="${name}">${pairs.map(([v,l])=>`<option value="${v}"${v===cur?' selected':''}>${esc(l)}</option>`).join('')}</select>`;
+function openForm(title, html, okLabel, onOk){ const d = $('fdlg'); $('fdT').textContent = title; $('fdB').innerHTML = html; $('fdE').textContent = ''; $('fdC').textContent = tr('c.cancel'); $('fdS').textContent = okLabel || tr('c.save'); d._ok = onOk; d.showModal(); const f = d.querySelector('input[type=text],input:not([type=radio]),textarea'); if(f) f.focus(); }
+$('fdF').onsubmit = e => { e.preventDefault(); const d = $('fdlg'), r = d._ok(new FormData($('fdF'))); if(r) $('fdE').textContent = r; else d.close(); };
+$('fdC').onclick = () => $('fdlg').close();
+function toolbarInput(id, ph, val){ return `<input type="search" id="${id}" placeholder="${esc(ph)}" aria-label="${esc(ph)}" value="${esc(val)}">`; }
+function keepFocus(fn){ const a = document.activeElement, id = a && a.id, pos = a && a.selectionStart; fn(); if(id){ const n = $(id); if(n){ n.focus(); try{ n.setSelectionRange(pos,pos); }catch(e){} } } }
+
+/* ---------- Subjects ---------- */
+const SF = {q:''};
+function subStats(s){ const names = new Set(subNames(s)), cut = new Date(); cut.setDate(cut.getDate()-6); const c = isoDay(cut); let tot = 0, wk = 0;
+  state.sessions.forEach(x => { if(x.sub && names.has(lc(x.sub))){ tot += x.min; if(x.date >= c) wk += x.min; } }); return {tot, wk}; }
+const unlinkedNames = have => state.subjects.filter(n => !have.has(lc(n)) && state.sessions.some(x => x.sub && lc(x.sub)===lc(n)));   // only names that real sessions use; unused suggestions are not imported
+function renderSubjects(){ const v = $('v-subjects'); if(v.hidden) return;
+  const have = new Set(PL.subjects.flatMap(subNames)), unlinked = unlinkedNames(have);
+  const list = PL.subjects.filter(s => !SF.q || lc(s.name+' '+s.desc).includes(lc(SF.q)));
+  keepFocus(() => { v.innerHTML = `<div class="ph"><div><h2>${esc(tr('subj.title'))}</h2><p class="small">${esc(tr('subj.desc'))}</p></div><button type="button" class="primary" data-a="add">${esc(tr('subj.add'))}</button></div>`
+   + (unlinked.length ? `<div class="banner2"><span>${esc(tr('subj.import',{n:unlinked.length}))}</span><button type="button" class="sm" data-a="import">${esc(tr('subj.importBtn'))}</button></div>` : '')
+   + (PL.subjects.length ? toolbarInput('sSearch', tr('subj.search'), SF.q) : '')
+   + (!PL.subjects.length ? `<div class="card empty"><b>${esc(tr('subj.none'))}</b><p class="small">${esc(tr('subj.noneD'))}</p></div>` : !list.length ? `<p class="small">${esc(tr('subj.noMatch'))}</p>` :
+   `<div class="grid" style="margin-top:var(--s3)">` + list.map(s => { const st = subStats(s), ot = PL.tasks.filter(t=>t.sid===s.id && t.st!=='done').length, nn = PL.notes.filter(n=>n.sid===s.id).length;
+     return `<div class="card sc" style="--c:${s.color}" data-id="${esc(s.id)}"><div class="hd"><span class="ico" aria-hidden="true">${s.icon}</span><b>${esc(s.name)}</b></div>${s.desc?`<p class="small" style="margin:0">${esc(s.desc)}</p>`:''}
+     <div class="small">${esc(tr('subj.studied',{d:dur(st.tot)}))}${s.target?`<br>${esc(tr('subj.week',{a:dur(st.wk), b:dur(Math.round(s.target*60))}))}`:''}</div>
+     <div class="small">${esc(tr('subj.open',{t:ot,n:nn}))}</div>
+     <div class="acts"><button type="button" class="sm" data-a="tasks">${esc(tr('nav.tasks'))}</button><button type="button" class="sm" data-a="notes">${esc(tr('nav.notes'))}</button><button type="button" class="sm" data-a="edit">${esc(tr('c.edit'))}</button><button type="button" class="sm danger" data-a="del">${esc(tr('c.delete'))}</button></div></div>`; }).join('') + '</div>');
+   const q = $('sSearch'); if(q) q.oninput = () => { SF.q = q.value; renderSubjects(); }; });
+}
+function subjectForm(s){ if(!s && PL.subjects.length>=100) return toast(tr('subj.limit'));
+  const c = s?s.color:COLORS[0], ic = s?s.icon:ICONS[0];
+  openForm(s?tr('subj.edit'):tr('subj.new'),
+   fld(tr('subj.name'),`<input type="text" name="name" maxlength="30" value="${esc(s?s.name:'')}">`)+fld(tr('subj.descF'),`<textarea name="desc" maxlength="200">${esc(s?s.desc:'')}</textarea>`)
+   +fld(tr('subj.color'),`<div class="sws">${COLORS.map(x=>`<label><input type="radio" name="color" value="${x}"${x===c?' checked':''}><i style="--c:${x}"></i></label>`).join('')}</div>`)
+   +fld(tr('subj.icon'),`<div class="sws ic">${ICONS.map(x=>`<label><input type="radio" name="icon" value="${x}"${x===ic?' checked':''}><i>${x}</i></label>`).join('')}</div>`)
+   +fld(tr('subj.target'),`<input type="number" name="target" min="0" max="168" step="0.5" inputmode="decimal" value="${s&&s.target?s.target:''}">`), null, fd => {
+    const name = str(fd.get('name'),30); if(!name) return tr('subj.nameReq');
+    if(PL.subjects.some(x => x.id!==(s&&s.id) && subNames(x).includes(lc(name)))) return tr('subj.dup');
+    const tg = fd.get('target')===''?0:Number(fd.get('target')); if(!(tg>=0 && tg<=168)) return tr('subj.tgtBad');
+    const rec = cleanSub({id:s&&s.id, name, desc:fd.get('desc'), color:fd.get('color'), icon:fd.get('icon'), target:tg, aliases:s?s.aliases:[]});
+    if(s && lc(s.name)!==lc(name) && !rec.aliases.map(lc).includes(lc(s.name))) rec.aliases.push(s.name);   // sessions keep the old name; it stays linked as an alias
+    if(s) PL.subjects[PL.subjects.indexOf(s)] = rec; else PL.subjects.push(rec);
+    legacyName(name); if(!savePlan()) return tr('c.storage'); planRender(); render(); toast(tr('c.saved')); }); }
+$('v-subjects').onclick = async e => { const b = e.target.closest('button[data-a]'); if(!b) return; const a = b.dataset.a, card = b.closest('[data-id]'), s = card && subOf(card.dataset.id);
+  if(a==='add') subjectForm(); else if(a==='edit') subjectForm(s);
+  else if(a==='import'){ const have = new Set(PL.subjects.flatMap(subNames)); let n = 0;
+    unlinkedNames(have).forEach(nm => { if(!have.has(lc(nm)) && PL.subjects.length<100){ const r = cleanSub({name:nm, color:COLORS[PL.subjects.length%COLORS.length]}); if(r){ PL.subjects.push(r); have.add(lc(nm)); n++; } } });
+    if(savePlan()){ planRender(); toast(tr('subj.imported',{n})); } }
+  else if(a==='tasks'){ TF.sid = s.id; go('tasks'); } else if(a==='notes'){ NF.sid = s.id; go('notes'); }
+  else if(a==='del'){ if(!(await ask(tr('subj.delConfirm',{n:s.name}), tr('c.delete')))) return;
+    PL.tasks.forEach(t => { if(t.sid===s.id) t.sid = ''; }); PL.notes.forEach(n => { if(n.sid===s.id) n.sid = ''; }); PL.subjects = PL.subjects.filter(x => x!==s);
+    if(savePlan()){ planRender(); toast(tr('c.deleted')); } } };
+
+/* ---------- Tasks ---------- */
+const TF = {q:'', view:'all', sid:'', pri:'', st:'', sort:'due'};
+const nowHM = () => { const d = new Date(); return pad(d.getHours())+':'+pad(d.getMinutes()); };
+const isOver = t => t.st!=='done' && t.due && (t.due < today() || (t.due===today() && t.time && t.time < nowHM()));
+function dueLabel(t){ if(!t.due) return tr('task.noDue'); const d = new Date(t.due+'T00:00:00'), n = new Date(today()+'T00:00:00'), diff = Math.round((d-n)/864e5);
+  const time = t.time ? ' · '+t.time : ''; return (diff===0?tr('task.dToday'):diff===1?tr('task.dTom'):fmtD(t.due+'T00:00:00')) + time; }
+function taskRow(t, compact){ const s = subOf(t.sid), od = isOver(t);
+  return `<div class="tk${t.st==='done'?' dn':''}" data-id="${esc(t.id)}"><button type="button" class="chk${t.st==='done'?' on':''}" data-a="tog" role="checkbox" aria-checked="${t.st==='done'}" aria-label="${esc(tr(t.st==='done'?'task.reopen':'task.complete')+': '+t.title)}">${t.st==='done'?'✓':''}</button>
+   <div class="bd"><div class="t">${esc(t.title)}</div><div class="meta">${s?`<span>${s.icon} ${esc(s.name)}</span>`:''}<span class="pill ${t.pri}">${esc(tr('pri.'+t.pri))}</span>${t.st==='prog'?`<span class="pill">${esc(tr('st.prog'))}</span>`:''}<span class="${od?'pill od':''}">${esc(od?tr('f.overdue')+' · '+dueLabel(t):dueLabel(t))}</span>${t.est?`<span>${esc(tr('task.min',{n:t.est}))}</span>`:''}</div>${!compact&&t.desc?`<div class="small" style="margin-top:4px;overflow-wrap:anywhere">${esc(t.desc)}</div>`:''}</div>
+   ${compact?'':`<button type="button" class="ibtn" data-a="edit" aria-label="${esc(tr('c.edit'))}">✎</button><button type="button" class="ibtn" data-a="del" aria-label="${esc(tr('c.delete'))}">🗑</button>`}</div>`; }
+function visibleTasks(){ const td = today(); const po = {high:0, med:1, low:2}, key = t => (t.due||'9999-99-99')+(t.time||'99:99');
+  const a = PL.tasks.filter(t => (!TF.q || lc(t.title+' '+t.desc).includes(lc(TF.q))) && (!TF.sid || t.sid===TF.sid) && (!TF.pri || t.pri===TF.pri) && (!TF.st || t.st===TF.st)
+   && (TF.view==='all' || (TF.view==='today' && t.due===td && t.st!=='done') || (TF.view==='upcoming' && t.due>td && t.st!=='done') || (TF.view==='overdue' && isOver(t)) || (TF.view==='done' && t.st==='done')));
+  return a.sort((x,y) => (x.st==='done')-(y.st==='done') || (TF.sort==='pri' ? po[x.pri]-po[y.pri] || key(x).localeCompare(key(y)) : TF.sort==='new' ? y.created.localeCompare(x.created) : key(x).localeCompare(key(y)))); }
+function renderTasks(){ const v = $('v-tasks'); if(v.hidden) return; const list = visibleTasks();
+  keepFocus(() => { v.innerHTML = `<div class="ph"><div><h2>${esc(tr('task.title'))}</h2><p class="small">${esc(tr('task.desc'))}</p></div><button type="button" class="primary" data-a="add">${esc(tr('task.add'))}</button></div>`
+   + `<div class="tb">${toolbarInput('tSearch', tr('task.search'), TF.q)}<div class="seg" role="group">${['all','today','upcoming','overdue','done'].map(k=>`<button type="button" data-view="${k}" class="${TF.view===k?'on':''}" aria-pressed="${TF.view===k}">${esc(tr('f.'+k))}</button>`).join('')}</div>
+   <div class="fl"><select id="tFilSub" aria-label="${esc(tr('c.allSubj'))}"><option value="">${esc(tr('c.allSubj'))}</option>${PL.subjects.map(s=>`<option value="${esc(s.id)}"${s.id===TF.sid?' selected':''}>${esc(s.name)}</option>`).join('')}</select>
+   <select id="tPri" aria-label="${esc(tr('task.pri'))}"><option value="">${esc(tr('allPri'))}</option>${PRI.map(p=>`<option value="${p}"${p===TF.pri?' selected':''}>${esc(tr('pri.'+p))}</option>`).join('')}</select>
+   <select id="tSt" aria-label="${esc(tr('task.st'))}"><option value="">${esc(tr('allSt'))}</option>${STS.map(p=>`<option value="${p}"${p===TF.st?' selected':''}>${esc(tr('st.'+p))}</option>`).join('')}</select>
+   <select id="tSort" aria-label="Sort">${[['due','sort.due'],['pri','sort.pri'],['new','sort.new']].map(([k,l])=>`<option value="${k}"${k===TF.sort?' selected':''}>${esc(tr(l))}</option>`).join('')}</select></div></div>`
+   + `<div class="card">${!PL.tasks.length ? `<div class="empty"><b>${esc(tr('task.none'))}</b><p class="small">${esc(tr('task.noneD'))}</p></div>` : !list.length ? `<p class="small">${esc(tr('task.noMatch'))}</p>` : list.map(t=>taskRow(t)).join('')}</div>`;
+   $('tSearch').oninput = e => { TF.q = e.target.value; renderTasks(); };
+   [['tFilSub','sid'],['tPri','pri'],['tSt','st'],['tSort','sort']].forEach(([id,k]) => $(id).onchange = e => { TF[k] = e.target.value; renderTasks(); }); }); }
+function taskForm(t){ const d = t || {}; openForm(t?tr('task.edit'):tr('task.new'),
+   fld(tr('task.ttl'),`<input type="text" name="title" maxlength="120" value="${esc(d.title||'')}">`)+fld(tr('task.descF'),`<textarea name="desc" maxlength="600">${esc(d.desc||'')}</textarea>`)
+   +fld(tr('subj.title'),subSel('sid', d.sid||(TF.sid||'')))+`<div class="row">${fld(tr('task.due'),`<input type="date" name="due" value="${esc(d.due||'')}">`)}${fld(tr('task.time'),`<input type="time" name="time" value="${esc(d.time||'')}">`)}</div>`
+   +`<div class="row">${fld(tr('task.pri'),optSel('pri',PRI.map(p=>[p,tr('pri.'+p)]),d.pri||'med'))}${fld(tr('task.st'),optSel('st',STS.map(p=>[p,tr('st.'+p)]),d.st||'todo'))}</div>`
+   +fld(tr('task.est'),`<input type="number" name="est" min="1" max="1440" inputmode="numeric" value="${d.est||''}">`), null, fd => {
+    const title = str(fd.get('title'),120); if(!title) return tr('task.titleReq'); const est = fd.get('est')===''?0:Number(fd.get('est')); if(est && !(Number.isInteger(est) && est>=1 && est<=1440)) return tr('task.estBad');
+    const st = fd.get('st'), rec = cleanTask({id:t&&t.id, title, desc:fd.get('desc'), sid:fd.get('sid'), due:fd.get('due'), time:fd.get('due')?fd.get('time'):'', pri:fd.get('pri'), st, est, created:t&&t.created, done: st==='done' ? ((t&&t.done)||new Date().toISOString()) : ''});
+    if(t) PL.tasks[PL.tasks.indexOf(t)] = rec; else PL.tasks.push(rec); if(!savePlan()) return tr('c.storage'); planRender(); toast(tr('c.saved')); }); }
+async function taskAction(e){ const b = e.target.closest('button[data-a]'); if(!b || b.dataset.a==='add') return false; const row = b.closest('[data-id]'), t = row && PL.tasks.find(x => x.id===row.dataset.id); if(!t) return false;
+  if(b.dataset.a==='tog'){ const done = t.st==='done'; t.st = done?'todo':'done'; t.done = done?'':new Date().toISOString(); if(savePlan()) planRender(); }
+  else if(b.dataset.a==='edit') taskForm(t);
+  else if(b.dataset.a==='del'){ if(!(await ask(tr('task.delConfirm',{n:t.title}), tr('c.delete')))) return true; PL.tasks = PL.tasks.filter(x => x!==t); if(savePlan()){ planRender(); toast(tr('c.deleted')); } }
+  return true; }
+$('v-tasks').onclick = e => { const b = e.target.closest('button'); if(!b) return; if(b.dataset.a==='add') return taskForm(); if(b.dataset.view){ TF.view = b.dataset.view; return renderTasks(); } taskAction(e); };
+$('htList').onclick = e => taskAction(e); $('htAdd').onclick = () => taskForm(); $('htAll').onclick = () => { TF.view = 'all'; TF.sid = ''; go('tasks'); };
+function renderHomeTasks(){ const td = today(), a = PL.tasks.filter(t => t.st!=='done' && t.due && t.due<=td).sort((x,y) => (isOver(y)-isOver(x)) || PRI.indexOf(x.pri)-PRI.indexOf(y.pri)), over = a.filter(isOver).length;
+  $('htList').innerHTML = (over ? `<div class="small" style="color:var(--warn);font-weight:600">${esc(tr('home.tOver'))}: ${over}</div>` : '') + (a.length ? a.slice(0,4).map(t => taskRow(t,true)).join('') : `<p class="small" style="margin:0 0 var(--s2)">${esc(tr('home.tNone'))}</p>`); }
+
+/* ---------- Notes (redesigned list; storage, save and editor flows are unchanged) ---------- */
+const NF = {q:'', view:'all', sid:'', tag:'', sort:'upd'}; let NE = null, nTimer = null, NMenu = null;
+const NSORT = {upd:(x,y) => Date.parse(y.updated)-Date.parse(x.updated), new:(x,y) => Date.parse(y.created)-Date.parse(x.created), old:(x,y) => Date.parse(x.created)-Date.parse(y.created), az:(x,y) => lc(x.title||'~').localeCompare(lc(y.title||'~'))};
+const nRecent = n => Date.parse(n.updated) >= Date.now() - 7*864e5;
+const nIco = p => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
+const NI = {plus:nIco('<path d="M12 5v14M5 12h14"/>'), search:nIco('<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/>'), book:nIco('<path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5"/><path d="M9 13h7M9 17h7"/>'), pin:nIco('<path d="M9 4h6l-1 6 3 3H7l3-3z"/><path d="M12 13v7"/>'), more:nIco('<circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/>'), clock:nIco('<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>'), trash:nIco('<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>')};
+function nMatch(n){ const q = lc(NF.q).trim(), s = subOf(n.sid);
+  if(q && !lc([n.title, n.body, n.tags.join(' '), s ? s.name : ''].join(' ')).includes(q)) return false;
+  if(NF.sid && n.sid!==NF.sid) return false;
+  if(NF.tag && !n.tags.includes(NF.tag)) return false;
+  return NF.view==='all' || (NF.view==='pinned' && n.pin) || (NF.view==='recent' && nRecent(n)) || (NF.view==='tags' && n.tags.length>0); }
+function nCard(n){ const s = subOf(n.sid), prev = n.body.trim().slice(0,240);
+  return `<article class="nt-card${n.pin?' is-pin':''}" style="--nc:${esc(s ? s.color : 'var(--acc)')}"><button type="button" class="nt-open" data-open="${esc(n.id)}"><span class="nt-ti">${n.pin?`<i class="nt-pin" title="${esc(tr('note.pinned'))}">${NI.pin}</i>`:''}<b>${esc(n.title||tr('note.untitled'))}</b></span>${prev?`<span class="nt-sn">${esc(prev)}</span>`:''}</button><div class="nt-ft">${s?`<span class="nt-sub">${esc(s.icon+' '+s.name)}</span>`:''}${n.tags.slice(0,3).map(x => `<span class="nt-tg">#${esc(x)}</span>`).join('')}<span class="nt-dt">${esc(fmtD(n.updated))}</span></div><button type="button" class="nt-more" data-more="${esc(n.id)}" aria-label="${esc(tr('note.more'))}" aria-haspopup="menu">${NI.more}</button></article>`; }
+function renderNotes(){ if($('v-notes').hidden || NE) return; const L = $('nList'), all = PL.notes, a = all.filter(nMatch).sort((x,y) => (y.pin-x.pin) || NSORT[NF.sort](x,y));
+  const cnt = {all:all.length, pinned:all.filter(n => n.pin).length, recent:all.filter(nRecent).length, tags:all.filter(n => n.tags.length).length};
+  const tags = [...new Set(all.flatMap(n => n.tags))].sort(), last = all.slice().sort(NSORT.upd)[0];
+  const chip = (attr, val, label, on, col) => `<button type="button" class="nt-chip${on?' on':''}" ${attr}="${esc(val)}" aria-pressed="${on}">${col?`<i style="--c:${esc(col)}"></i>`:''}${esc(label)}</button>`;
+  const tabs = [['all','note.all'],['pinned','note.pinned'],['recent','note.recent'],['tags','note.tagsTab']].map(([k,l]) => `<button type="button" data-view="${k}" class="${NF.view===k?'on':''}" aria-pressed="${NF.view===k}">${esc(tr(l))}<i>${cnt[k]}</i></button>`).join('');
+  const subRail = PL.subjects.length ? `<div class="nt-rail" role="group" aria-label="${esc(tr('c.allSubj'))}">${chip('data-sub','',tr('note.all'),!NF.sid)}${PL.subjects.map(s => chip('data-sub', s.id, `${s.icon} ${s.name} · ${all.filter(n => n.sid===s.id).length}`, NF.sid===s.id, s.color)).join('')}</div>` : '';
+  const tagRail = NF.view==='tags' && tags.length ? `<div class="nt-rail" role="group" aria-label="${esc(tr('note.tagsTab'))}">${tags.map(t => chip('data-tag', t, '#'+t, NF.tag===t)).join('')}</div>` : '';
+  const qa = all.length ? `<div class="nt-qa"><button type="button" class="nt-qc" data-a="last">${NI.clock}<b>${esc(tr('note.continue'))}</b><small>${esc(last.title||tr('note.untitled'))}</small></button><button type="button" class="nt-qc" data-view="pinned">${NI.pin}<b>${esc(tr('note.pinned'))}</b><small>${esc(tr('note.nCount',{n:cnt.pinned}))}</small></button><p class="nt-tip">${esc(tr('note.tip'))}</p></div>` : '';
+  const bar = all.length ? `<div class="nt-tabs" role="group">${tabs}</div><div class="nt-bar"><label class="nt-search">${NI.search}<input type="search" id="nSearch" placeholder="${esc(tr('note.search'))}" aria-label="${esc(tr('note.search'))}" value="${esc(NF.q)}"></label><select id="nSort" aria-label="${esc(tr('note.sortLbl'))}">${[['upd','note.oUpd'],['new','note.oNew'],['old','note.oOld'],['az','note.oAz']].map(([v,k]) => `<option value="${v}"${NF.sort===v?' selected':''}>${esc(tr(k))}</option>`).join('')}</select></div>${subRail}${tagRail}` : '';
+  const body = !all.length ? `<div class="nt-empty"><span class="nt-big">${NI.book}</span><b>${esc(tr('note.none'))}</b><p>${esc(tr('note.intro'))}</p><button type="button" class="primary" data-a="new">${esc(tr('note.first'))}</button></div>`
+    : !a.length ? `<div class="nt-empty"><span class="nt-big">${NI.search}</span><b>${esc(tr('note.noMatch'))}</b><p>${esc(tr('note.noMatchD'))}</p><button type="button" data-a="clear">${esc(tr('note.clear'))}</button></div>`
+    : `<div class="nt-grid">${a.map(nCard).join('')}</div>`;
+  keepFocus(() => { L.innerHTML = `<div class="nt-hd"><span class="nt-mark">${NI.book}</span><div class="nt-tl"><h2>${esc(tr('note.title'))}</h2><p>${esc(tr('note.desc'))}</p></div><button type="button" class="nt-new" data-a="new">${NI.plus}<span>${esc(tr('note.add'))}</span></button></div>${qa}${bar}${body}`; });
+}
+function nStatus(k){ const el = $('nSv'); if(!el) return; el.textContent = tr(k==='saving'?'note.saving':k==='fail'?'note.fail':'note.savedS'); el.className = 'svs'+(k==='fail'?' bad':''); }
+function nStatus(k){ const el = $('nSv'); if(!el) return; el.textContent = tr(k==='saving'?'note.saving':k==='fail'?'note.fail':'note.savedS'); el.className = 'svs'+(k==='fail'?' bad':''); }
+function nSave(){ clearTimeout(nTimer); nTimer = null; if(!NE) return true; const g = id => $(id).value;
+  const rec = cleanNote({id:NE.n.id, title:g('nT'), body:g('nB'), sid:g('nS'), tags:g('nG').split(/[,،]/), pin:NE.n.pin, created:NE.n.created, updated:new Date().toISOString()});
+  if(!rec){ if(NE.isNew) return true; nStatus('saved'); $('nSv').textContent = tr('note.emptyNote'); return true; }     // an existing note is never replaced by an empty one
+  const i = PL.notes.findIndex(x => x.id===rec.id); if(i>=0) PL.notes[i] = rec; else PL.notes.push(rec); NE.n = rec; NE.isNew = false;
+  const ok = savePlan(); nStatus(ok?'saved':'fail'); return ok; }
+function nDirty(){ nStatus('saving'); clearTimeout(nTimer); nTimer = setTimeout(nSave, 700); }
+function openNote(id){ const ex = id && PL.notes.find(x => x.id===id); NE = {isNew:!ex, n: ex || {id:rid('n'), pin:false, created:new Date().toISOString()}}; const n = NE.n, E = $('nEd');
+  E.innerHTML = `<div class="edh"><button type="button" class="back" data-a="back">${esc(tr('note.back'))}</button><span class="svs" id="nSv" role="status">${esc(tr('note.savedS'))}</span><span><button type="button" class="sm" data-a="pin" aria-pressed="${!!n.pin}">${esc(tr(n.pin?'note.unpin':'note.pin'))}</button> <button type="button" class="sm" data-a="save">${esc(tr('note.saveNow'))}</button> <button type="button" class="sm danger" data-a="del">${esc(tr('c.delete'))}</button></span></div>
+   <div class="ed card"><input type="text" id="nT" class="tt" maxlength="120" placeholder="${esc(tr('note.ttl'))}" aria-label="${esc(tr('note.ttl'))}" value="${esc(n.title||'')}"><div class="row">${subSel('nS', n.sid||'').replace('name="nS" id="nSF"','id="nS" aria-label="Subject"')}<input type="text" id="nG" placeholder="${esc(tr('note.tags'))}" aria-label="${esc(tr('note.tags'))}" value="${esc((n.tags||[]).join(', '))}"></div>
+   <textarea id="nB" placeholder="${esc(tr('note.body'))}" aria-label="${esc(tr('note.body'))}" maxlength="100000"></textarea></div>`;
+  $('nB').value = n.body || ''; ['nT','nS','nG','nB'].forEach(i => $(i).addEventListener('input', nDirty)); $('nS').addEventListener('change', nDirty);
+  $('nList').hidden = true; E.hidden = false; $(id?'nB':'nT').focus(); window.scrollTo(0,0); }
+function closeNote(){ if(!NE) return; const ok = nSave(); if(!ok && !confirm(tr('note.fail'))) return; NE = null; $('nEd').hidden = true; $('nList').hidden = false; renderNotes(); }
+$('nEd').onclick = async e => { const b = e.target.closest('button[data-a]'); if(!b || !NE) return; const a = b.dataset.a;
+  if(a==='back') closeNote(); else if(a==='save') nSave();
+  else if(a==='pin'){ NE.n.pin = !NE.n.pin; b.setAttribute('aria-pressed', NE.n.pin); b.textContent = tr(NE.n.pin?'note.unpin':'note.pin'); const rec = PL.notes.find(x=>x.id===NE.n.id); if(rec) rec.pin = NE.n.pin; nSave(); }
+  else if(a==='del'){ if(!(await ask(tr('note.delConfirm'), tr('c.delete')))) return; clearTimeout(nTimer); PL.notes = PL.notes.filter(x => x.id!==NE.n.id); const ok = savePlan(); NE = null; $('nEd').hidden = true; $('nList').hidden = false; renderNotes(); if(ok) toast(tr('c.deleted')); } };
+$('nList').onclick = e => { const b = e.target.closest('button'); if(!b) return; const d = b.dataset;
+  if(d.a==='new') return openNote();
+  if(d.a==='last'){ const l = PL.notes.slice().sort(NSORT.upd)[0]; if(l) openNote(l.id); return; }
+  if(d.a==='clear'){ Object.assign(NF, {q:'', sid:'', tag:'', view:'all'}); return renderNotes(); }
+  if(d.view){ NF.view = d.view; if(d.view!=='tags') NF.tag = ''; return renderNotes(); }
+  if(b.hasAttribute('data-sub')){ NF.sid = d.sub && NF.sid!==d.sub ? d.sub : ''; return renderNotes(); }
+  if(b.hasAttribute('data-tag')){ NF.tag = d.tag && NF.tag!==d.tag ? d.tag : ''; return renderNotes(); }
+  if(d.more) return nMenu(d.more, b);
+  if(d.open) openNote(d.open); };
+$('nList').oninput = e => { if(e.target.id==='nSearch'){ NF.q = e.target.value; renderNotes(); } };
+$('nList').onchange = e => { if(e.target.id==='nSort'){ NF.sort = e.target.value; renderNotes(); } };
+/* Card menu: a small popover next to the card's "more" button. Closes on outside tap, Escape, scroll or resize */
+function nCloseMenu(){ if(NMenu){ NMenu.remove(); NMenu = null; } }
+function nMenu(id, btn){ nCloseMenu(); const n = PL.notes.find(x => x.id===id); if(!n) return;
+  const m = document.createElement('div'); m.className = 'pop nt-menu'; m.setAttribute('role','menu');
+  m.innerHTML = `<button type="button" role="menuitem" data-m="open">${NI.book}<span>${esc(tr('note.open'))}</span></button><button type="button" role="menuitem" data-m="pin">${NI.pin}<span>${esc(tr(n.pin?'note.unpin':'note.pin'))}</span></button><button type="button" role="menuitem" class="nt-danger" data-m="del">${NI.trash}<span>${esc(tr('c.delete'))}</span></button>`;
+  document.body.appendChild(m); const r = btn.getBoundingClientRect(), w = m.offsetWidth, h = m.offsetHeight;
+  m.style.top = (r.bottom + h + 8 > innerHeight ? Math.max(8, r.top - h - 4) : r.bottom + 4) + 'px';
+  m.style.left = Math.max(8, Math.min(r.right - w, innerWidth - w - 8)) + 'px';
+  m.onclick = async e => { const b = e.target.closest('button[data-m]'); if(!b) return; nCloseMenu(); const a = b.dataset.m;
+    if(a==='open') return openNote(id);
+    if(a==='pin'){ n.pin = !n.pin; if(savePlan()){ renderNotes(); toast(tr(n.pin?'note.pinOn':'note.pinOff')); } return; }
+    if(!(await ask(tr('note.delConfirm'), tr('c.delete')))) return;
+    PL.notes = PL.notes.filter(x => x.id!==id); if(savePlan()){ renderNotes(); toast(tr('c.deleted')); } };
+  NMenu = m; }
+document.addEventListener('click', e => { if(NMenu && !e.target.closest('.nt-menu,[data-more]')) nCloseMenu(); });
+document.addEventListener('keydown', e => { if(e.key==='Escape') nCloseMenu(); });
+window.addEventListener('scroll', nCloseMenu, {passive:true}); window.addEventListener('resize', nCloseMenu);
+['pagehide','beforeunload'].forEach(ev => window.addEventListener(ev, () => { if(NE) nSave(); }));
+document.addEventListener('visibilitychange', () => { if(document.hidden && NE) nSave(); });
+
+/* ---------- Wiring ---------- */
+/* ===== exam countdown. Exams live in PL.exams, so they export and import with the plan data ===== */
+function cleanExam(x){ if(!x || typeof x!=='object') return null; const name = str(x.name,120); if(!name || !isDate(x.date)) return null;
+  const ck = (Array.isArray(x.checklist)?x.checklist:[]).map(c => (c && typeof c==='object' && str(c.text,160)) ? {id: str(c.id,40)||rid('c'), text: str(c.text,160), done: c.done===true} : null).filter(Boolean).slice(0,60);
+  return {id: str(x.id,40)||rid('e'), name, sid: str(x.sid,40), date: x.date, time: /^\d{2}:\d{2}$/.test(x.time||'')?x.time:'', room: str(x.room,120), desc: str(x.desc,600), notes: typeof x.notes==='string' ? x.notes.slice(0,5000) : '', checklist: ck, created: okIso(x.created)?x.created:new Date().toISOString()}; }
+const EXF = {sid:''};
+const examDays = e => Math.round((parse(e.date) - parse(today())) / 864e5);   // whole calendar days; rounding absorbs DST hours
+const fmtDate = k => { const d = parse(k); return `${d.getDate()} ${monthName(d.getMonth())} ${d.getFullYear()}`; };
+const byDate = (a,b) => a.date.localeCompare(b.date) || (a.time||'99:99').localeCompare(b.time||'99:99');
+function examLabel(e){ const d = examDays(e); return d===0 ? tr('exam.today') : d===1 ? tr('exam.tomorrow') : d>1 ? tr('exam.in',{n:d}) : d===-1 ? tr('exam.yesterday') : tr('exam.passed',{n:-d}); }
+const prepText = e => tr('exam.prepDone',{d:e.checklist.filter(c=>c.done).length, n:e.checklist.length});
+function examCard(e, past){ const s = subOf(e.sid), when = [fmtDate(e.date), e.time, e.room].filter(Boolean).join(' · ');
+  return `<article class="card exam${past?' past':''}" data-id="${esc(e.id)}"><div class="exh"><div><b>${esc(e.name)}</b>${s?`<small class="small">${esc(s.icon+' '+s.name)}</small>`:''}</div><span class="exc">${esc(examLabel(e))}</span></div>`
+  + `<p class="small">${esc(when)}</p>${e.desc?`<p class="small">${esc(e.desc)}</p>`:''}`
+  + (e.checklist.length ? `<details><summary>${esc(prepText(e))}</summary><ul class="ckl">${e.checklist.map(c=>`<li><label><input type="checkbox" data-cid="${esc(c.id)}"${c.done?' checked':''}> <span>${esc(c.text)}</span></label></li>`).join('')}</ul></details>` : '')
+  + (e.notes ? `<p class="small exn">${esc(e.notes)}</p>` : '')
+  + `<div class="row"><button type="button" data-a="edit">${esc(tr('exam.edit'))}</button><button type="button" data-a="del">${esc(tr('exam.del'))}</button></div></article>`; }
+function renderExams(){ const v = $('v-exams'); if(v.hidden) return; const all = PL.exams, list = all.filter(e => !EXF.sid || e.sid===EXF.sid);
+  const up = list.filter(e => examDays(e) >= 0).sort(byDate), past = list.filter(e => examDays(e) < 0).sort((a,b) => byDate(b,a));
+  v.innerHTML = `<div class="ph"><div><h2>${esc(tr('exam.title'))}</h2><p class="small">${esc(tr('exam.desc'))}</p></div><button type="button" class="primary" data-a="add">${esc(tr('exam.add'))}</button></div>`
+  + (all.length ? `<div class="fl"><select id="exSub" aria-label="${esc(tr('c.allSubj'))}"><option value="">${esc(tr('c.allSubj'))}</option>${PL.subjects.map(s=>`<option value="${esc(s.id)}"${s.id===EXF.sid?' selected':''}>${esc(s.name)}</option>`).join('')}</select></div>` : '')
+  + (!all.length ? `<div class="card empty"><b>${esc(tr('exam.none'))}</b><p class="small">${esc(tr('exam.noneD'))}</p><button type="button" class="primary" data-a="add">${esc(tr('exam.add'))}</button></div>`
+  : !list.length ? `<p class="small">${esc(tr('exam.noMatch'))}</p>`
+  : (up.length ? `<h3 class="grp">${esc(tr('exam.upcoming'))}</h3>${up.map(e => examCard(e)).join('')}` : '') + (past.length ? `<h3 class="grp">${esc(tr('exam.past'))}</h3>${past.map(e => examCard(e,true)).join('')}` : ''));
+  const sel = $('exSub'); if(sel) sel.onchange = e => { EXF.sid = e.target.value; renderExams(); };
+}
+function renderHomeExams(){ const el = $('hxList'); if(!el) return; const up = PL.exams.filter(e => examDays(e) >= 0).sort(byDate).slice(0,3);
+  el.innerHTML = up.length ? up.map(e => `<div class="hx"><span><b>${esc(e.name)}</b><small class="small">${esc(fmtDate(e.date))}</small></span><span class="exc">${esc(examLabel(e))}</span></div>`).join('') : `<p class="small">${esc(tr('exam.homeNone'))}</p>`; }
+function examForm(ex){ const d = ex || {}; openForm(ex?tr('exam.edit'):tr('exam.new'),
+  fld(tr('exam.name'),`<input type="text" name="name" maxlength="120" value="${esc(d.name||'')}">`)
+  +fld(tr('subj.title'),subSel('sid', d.sid||EXF.sid||''))
+  +`<div class="row">${fld(tr('exam.date'),`<input type="date" name="date" value="${esc(d.date||'')}">`)}${fld(tr('exam.time'),`<input type="time" name="time" value="${esc(d.time||'')}">`)}</div>`
+  +fld(tr('exam.room'),`<input type="text" name="room" maxlength="120" value="${esc(d.room||'')}">`)
+  +fld(tr('task.descF'),`<textarea name="desc" maxlength="600">${esc(d.desc||'')}</textarea>`)
+  +fld(tr('exam.checklist'),`<textarea name="checklist" maxlength="3000">${esc((d.checklist||[]).map(c=>c.text).join('\n'))}</textarea>`)
+  +fld(tr('exam.notes'),`<textarea name="notes" maxlength="5000">${esc(d.notes||'')}</textarea>`), null, fd => {
+    const name = str(fd.get('name'),120); if(!name) return tr('exam.nameReq');
+    const date = fd.get('date'); if(!isDate(date)) return tr('exam.dateReq');
+    const old = d.checklist||[];
+    const checklist = String(fd.get('checklist')||'').split('\n').map(s=>s.trim()).filter(Boolean).slice(0,60).map(text => { const p = old.find(c => c.text===text); return {id: p?p.id:rid('c'), text: text.slice(0,160), done: !!(p&&p.done)}; });
+    const rec = cleanExam({id:ex&&ex.id, name, sid:fd.get('sid'), date, time:fd.get('time')||'', room:fd.get('room'), desc:fd.get('desc'), notes:fd.get('notes'), checklist, created:ex&&ex.created});
+    if(!rec) return tr('exam.dateReq');
+    if(ex) PL.exams[PL.exams.indexOf(ex)] = rec; else PL.exams.push(rec);
+    if(!savePlan()) return tr('c.storage'); planRender(); toast(tr('c.saved')); }); }
+$('v-exams').onclick = async e => { const b = e.target.closest('button[data-a]'); if(!b) return; if(b.dataset.a==='add') return examForm();
+  const card = b.closest('[data-id]'), ex = card && PL.exams.find(x => x.id===card.dataset.id); if(!ex) return;
+  if(b.dataset.a==='edit') examForm(ex);
+  else if(b.dataset.a==='del'){ if(!(await ask(tr('exam.delConfirm',{n:ex.name}), tr('c.delete')))) return; PL.exams = PL.exams.filter(x => x!==ex); if(savePlan()){ planRender(); toast(tr('c.deleted')); } } };
+$('v-exams').onchange = e => { const cb = e.target.closest('input[data-cid]'); if(!cb) return;
+  const ex = PL.exams.find(x => x.id===cb.closest('[data-id]').dataset.id), c = ex && ex.checklist.find(x => x.id===cb.dataset.cid); if(!c) return;
+  c.done = cb.checked; if(!savePlan()){ c.done = !cb.checked; cb.checked = c.done; return; }
+  cb.closest('details').querySelector('summary').textContent = prepText(ex); };
+$('hxAdd').onclick = () => examForm(); $('hxAll').onclick = () => { EXF.sid = ''; go('exams'); };
+/* ===== study planner. Plans live in PL.plans and point to subjects and tasks by ID, so nothing is duplicated ===== */
+const PLV = {mode:'day', day: today(), ovKey: null};
+const shiftDay = (k,n) => { const d = parse(k); d.setDate(d.getDate()+n); return dkey(d); };
+const weekStart = k => { const d = parse(k); d.setDate(d.getDate()-d.getDay()); return dkey(d); };
+const dayLabel = k => `${(bn()?BN_DAYS:EN_DAYS)[parse(k).getDay()]} ${fmtDate(k)}`;
+const byStart = (a,b) => a.date.localeCompare(b.date) || a.start.localeCompare(b.start);
+const overlaps = (a,b) => a.id!==b.id && a.date===b.date && a.st!=='skip' && b.st!=='skip' && a.start<b.end && b.start<a.end;
+const clashOf = p => PL.plans.find(q => overlaps(p,q));
+function planCard(p){ const s = subOf(p.sid), t = PL.tasks.find(x => x.id===p.tid), clash = clashOf(p);
+  const meta = [s ? s.icon+' '+s.name : '', t ? t.title : ''].filter(Boolean).join(' · ');
+  return `<article class="card exam plan" data-id="${esc(p.id)}"><div class="exh"><div><b>${esc(p.title)}</b>${meta?`<small class="small">${esc(meta)}</small>`:''}</div><span class="exc">${esc(tr('pst.'+p.st))}</span></div>`
+  + `<p class="small">${esc(dayLabel(p.date))} · ${p.start}–${p.end}${clash?` · ${esc(tr('pl.clash'))}`:''}</p>${p.desc?`<p class="small">${esc(p.desc)}</p>`:''}`
+  + `<div class="row">${(p.st==="planned"||p.st==="prog")?`<button type="button" data-a="focus">${esc(tr("pl.focus"))}</button>`:""}${p.sid?`<button type="button" data-a="res">${esc(tr("pl.res"))}</button>`:""}${PST.filter(v => v!==p.st).map(v => `<button type="button" data-a="set" data-v="${v}">${esc(tr('pl.to.'+v))}</button>`).join('')}<button type="button" data-a="edit">${esc(tr('exam.edit'))}</button><button type="button" data-a="del">${esc(tr('exam.del'))}</button></div></article>`; }
+function planList(list){ return list.length ? list.map(planCard).join('') : `<p class="small">${esc(tr('pl.empty'))}</p>`; }
+function dayNav(k, week){ const step = week ? 7 : 1, ws = week ? weekStart(k) : k, we = week ? shiftDay(ws,6) : k;
+  const label = week ? `${fmtDate(ws)} – ${fmtDate(we)}` : dayLabel(k);
+  return `<div class="pnav"><button type="button" data-pnav="${-step}">${esc(tr('pl.prev'))}</button><b>${esc(label)}</b><button type="button" data-pnav="${step}">${esc(tr('pl.next'))}</button><button type="button" data-pnav="0">${esc(tr('pl.today'))}</button></div>`; }
+function renderPlanner(){ const v = $('v-planner'); if(v.hidden) return; const all = PL.plans, td = today();
+  const modes = [['day','pl.day'],['week','pl.week'],['upcoming','pl.upcoming'],['done','pl.done']];
+  let body;
+  if(PLV.mode==='day') body = dayNav(PLV.day) + planList(all.filter(p => p.date===PLV.day).sort(byStart));
+  else if(PLV.mode==='week'){ const ws = weekStart(PLV.day); body = dayNav(PLV.day, true) + [0,1,2,3,4,5,6].map(i => { const k = shiftDay(ws,i); return `<h3 class="grp">${esc(dayLabel(k))}</h3>${planList(all.filter(p => p.date===k).sort(byStart))}`; }).join(''); }
+  else if(PLV.mode==='upcoming') body = planList(all.filter(p => p.date>=td && p.st!=='done' && p.st!=='skip').sort(byStart));
+  else body = planList(all.filter(p => p.st==='done').sort((a,b) => byStart(b,a)));
+  v.innerHTML = `<div class="ph"><div><h2>${esc(tr('pl.title'))}</h2><p class="small">${esc(tr('pl.desc'))}</p></div><button type="button" class="primary" data-a="add">${esc(tr('pl.add'))}</button></div>`
+  + `<div class="seg" role="group">${modes.map(([k,l]) => `<button type="button" data-pmode="${k}" class="${PLV.mode===k?'on':''}" aria-pressed="${PLV.mode===k}">${esc(tr(l))}</button>`).join('')}</div>`
+  + (all.length ? body : `<div class="card empty"><b>${esc(tr('pl.none'))}</b><p class="small">${esc(tr('pl.noneD'))}</p><button type="button" class="primary" data-a="add">${esc(tr('pl.add'))}</button></div>`);
+}
+function planForm(p){ const d = p || {}; openForm(p?tr('pl.edit'):tr('pl.new'),
+  fld(tr('pl.name'),`<input type="text" name="title" maxlength="120" value="${esc(d.title||'')}">`)
+  +fld(tr('subj.title'),subSel('sid', d.sid||''))
+  +fld(tr('pl.task'),`<select name="tid"><option value="">${esc(tr('pl.noTask'))}</option>${PL.tasks.map(t=>`<option value="${esc(t.id)}"${t.id===d.tid?' selected':''}>${esc(t.title)}</option>`).join('')}</select>`)
+  +`<div class="row">${fld(tr('pl.date'),`<input type="date" name="date" value="${esc(d.date||PLV.day)}">`)}${fld(tr('pl.start'),`<input type="time" name="start" value="${esc(d.start||'')}">`)}${fld(tr('pl.end'),`<input type="time" name="end" value="${esc(d.end||'')}">`)}</div>`
+  +`<div class="row">${fld(tr('task.pri'),optSel('pri',PRI.map(x=>[x,tr('pri.'+x)]),d.pri||'med'))}${fld(tr('pl.status'),optSel('st',PST.map(x=>[x,tr('pst.'+x)]),d.st||'planned'))}</div>`
+  +fld(tr('task.descF'),`<textarea name="desc" maxlength="600">${esc(d.desc||'')}</textarea>`), null, fd => {
+    const title = str(fd.get('title'),120); if(!title) return tr('pl.nameReq');
+    const date = fd.get('date'); if(!isDate(date)) return tr('exam.dateReq');
+    const start = fd.get('start'), end = fd.get('end'); if(!start || !end || end<=start) return tr('pl.endBad');
+    const rec = cleanPlanItem({id:p&&p.id, title, sid:fd.get('sid'), tid:fd.get('tid'), date, start, end, desc:fd.get('desc'), pri:fd.get('pri'), st:fd.get('st'), spent:p&&p.spent, created:p&&p.created});
+    if(!rec) return tr('pl.endBad');
+    const c = PL.plans.find(q => overlaps(rec,q)), key = [date,start,end,title].join('|');
+    if(c && PLV.ovKey!==key){ PLV.ovKey = key; return tr('pl.clashWarn',{n:c.title}); }   // first save shows the warning; saving again keeps both
+    PLV.ovKey = null;
+    if(p) PL.plans[PL.plans.indexOf(p)] = rec; else PL.plans.push(rec);
+    if(!savePlan()) return tr('c.storage'); planRender(); toast(tr('c.saved')); }); }
+$('v-planner').onclick = async e => { const b = e.target.closest('button'); if(!b) return;
+  if(b.dataset.pmode){ PLV.mode = b.dataset.pmode; return renderPlanner(); }
+  if(b.dataset.pnav!==undefined){ const n = Number(b.dataset.pnav); PLV.day = n ? shiftDay(PLV.day,n) : today(); return renderPlanner(); }
+  if(b.dataset.a==='add') return planForm();
+  const card = b.closest('[data-id]'), p = card && PL.plans.find(x => x.id===card.dataset.id); if(!p) return;
+  if(b.dataset.a==='focus') return startPlanFocus(p);
+  if(b.dataset.a==='res'){ LB.sid = p.sid; return go('library'); }
+  if(b.dataset.a==='set'){ p.st = b.dataset.v; if(savePlan()) planRender(); }
+  else if(b.dataset.a==='edit') planForm(p);
+  else if(b.dataset.a==='del'){ if(!(await ask(tr('pl.delConfirm',{n:p.title}), tr('c.delete')))) return; PL.plans = PL.plans.filter(x => x!==p); if(savePlan()){ planRender(); toast(tr('c.deleted')); } } };
+function renderHomePlans(){ const el = $('hpList'); if(!el) return; const td = today(), up = PL.plans.filter(p => p.date>=td && p.st!=='done' && p.st!=='skip').sort(byStart).slice(0,3);
+  el.innerHTML = up.length ? up.map(p => `<div class="hx"><span><b>${esc(p.title)}</b><small class="small">${esc(dayLabel(p.date))} · ${p.start}–${p.end}</small></span><span class="exc">${esc(tr('pst.'+p.st))}</span></div>`).join('') : `<p class="small">${esc(tr('pl.homeNone'))}</p>`; }
+$('hpAdd').onclick = () => planForm(); $('hpAll').onclick = () => { PLV.mode = 'day'; PLV.day = today(); go('planner'); };
+/* ===== calendar (redesigned). Events are read from PL.plans, PL.tasks and PL.exams on every render; nothing is copied.
+   Bangla and Hijri dates are calculated here. Government holidays are reference data (CV_GOV) and are never saved with user records. ===== */
+Object.assign(I18N.en,{"cv.sub":"Plan your days, stay on track.","cv.viewLbl":"Calendar view","cv.month":"Month","cv.week":"Week","cv.agenda":"Agenda","cv.altLbl":"Show Bangla and Hijri dates in grid","cv.bangla":"Bangla","cv.hijri":"Hijri","cv.legSel":"Today or selected","cv.hol":"Government holiday","cv.legend":"Legend","cv.items":"items","cv.hPlan":"Study plans","cv.hTask":"Tasks due","cv.hExam":"Exams","cv.hHol":"Government holiday","cv.addPlan":"New study plan","cv.addTask":"New task","cv.addExam":"New exam","cv.emptyDay":"Nothing planned for this day.","cv.emptyDayD":"Add a study plan, task or exam to get started.","cv.upTitle":"Upcoming","cv.upNone":"Nothing upcoming. Plans, tasks and exams you add will appear here.","cv.holTitle":"Government holidays","cv.holOff":"Compiled from the Ministry of Public Administration notification of 9 November 2025 and the later notifications for February, March, May, October and November 2026, as reported by the outlets below. The gazette PDFs themselves were not opened; check the latest official notice before relying on a specific day.","cv.holSrc":"Read the source","cv.holTent":"Tentative. The official {y} list has not been published yet, so only fixed national dates are shown. Eid and other moon-dependent holidays will appear once the gazette is issued.","cv.holNone":"No verified holiday list is stored for {y} in this version.","cv.holPast":"Already passed","cv.natCat":"National","cv.relCat":"Religious","cv.typeG":"Gazette holiday","cv.typeE":"Government order","cv.typeF":"Tentative","cv.noteNat":"Fixed national date.","cv.noteMoon":"Depends on the moon, so the date can shift by one day.","cv.noteExec":"Declared by a separate government order.","cv.noteTent":"Awaiting the official gazette.","cv.holUp":"Upcoming","cv.hijriNote":"Hijri dates use the tabular Islamic calendar. Bangladesh sets Eid and other Hijri dates by moon sighting. In 2026 both Eid days fell one day after the tabular date, so “One day later” shows that pattern. Moon-sighting dates are not predicted by this calendar.","cv.agendaNone":"Nothing scheduled this month.","cv.tentTag":"Tentative","cv.prevMonth":"Previous","cv.nextMonth":"Next","cv.lineKey":"In each day: top = Gregorian, middle = Bangla, bottom = Hijri.","cv.hjLbl":"Hijri day setting","cv.hjTab":"Tabular","cv.hjPlus":"One day later","cv.holSrcs":"Sources"});
+Object.assign(I18N.bn,{"cv.sub":"দিন পরিকল্পনা করুন, পড়ায় থাকুন ঠিক পথে।","cv.viewLbl":"ক্যালেন্ডারের ধরন","cv.month":"মাস","cv.week":"সপ্তাহ","cv.agenda":"তালিকা","cv.altLbl":"ক্যালেন্ডারে বাংলা ও হিজরি তারিখ","cv.bangla":"বাংলা","cv.hijri":"হিজরি","cv.legSel":"আজ বা নির্বাচিত দিন","cv.hol":"সরকারি ছুটি","cv.legend":"সংকেত","cv.items":"টি","cv.hPlan":"পড়ার পরিকল্পনা","cv.hTask":"কাজের শেষ সময়","cv.hExam":"পরীক্ষা","cv.hHol":"সরকারি ছুটি","cv.addPlan":"নতুন পরিকল্পনা","cv.addTask":"নতুন কাজ","cv.addExam":"নতুন পরীক্ষা","cv.emptyDay":"এই দিনে কোনো পরিকল্পনা নেই।","cv.emptyDayD":"পড়ার পরিকল্পনা, কাজ বা পরীক্ষা যোগ করে শুরু করুন।","cv.upTitle":"আসন্ন","cv.upNone":"কোনো আসন্ন কিছু নেই। নতুন পরিকল্পনা, কাজ বা পরীক্ষা যোগ করলে এখানে দেখা যাবে।","cv.holTitle":"সরকারি ছুটির তালিকা","cv.holOff":"জনপ্রশাসন মন্ত্রণালয়ের ৯ নভেম্বর ২০২৫ তারিখের প্রজ্ঞাপন এবং ২০২৬ সালের ফেব্রুয়ারি, মার্চ, মে, অক্টোবর ও নভেম্বরের পরবর্তী প্রজ্ঞাপন অনুযায়ী তালিকা, নিচের সংবাদমাধ্যমের প্রতিবেদন থেকে সংকলিত। প্রজ্ঞাপনের মূল পিডিএফ খোলা হয়নি, তাই নির্দিষ্ট দিনের ওপর নির্ভর করার আগে সর্বশেষ সরকারি প্রজ্ঞাপন দেখে নিন।","cv.holSrc":"সূত্র দেখুন","cv.holTent":"সাময়িক। {y} সালের সরকারি তালিকা এখনো প্রকাশিত হয়নি, তাই শুধু নির্ধারিত জাতীয় দিবস দেখানো হচ্ছে। ঈদ ও চাঁদের ওপর নির্ভরশীল ছুটি প্রজ্ঞাপন হলে যুক্ত হবে।","cv.holNone":"এই সংস্করণে {y} সালের যাচাই করা ছুটির তালিকা নেই।","cv.holPast":"পেরিয়ে গেছে","cv.natCat":"জাতীয়","cv.relCat":"ধর্মীয়","cv.typeG":"গেজেটে ঘোষিত","cv.typeE":"সরকারি আদেশ বা প্রজ্ঞাপন","cv.typeF":"সাময়িক","cv.noteNat":"নির্ধারিত জাতীয় দিবস।","cv.noteMoon":"চাঁদের ওপর নির্ভরশীল, তাই তারিখ এক দিন এদিক-ওদিক হতে পারে।","cv.noteExec":"আলাদা সরকারি আদেশে ঘোষিত।","cv.noteTent":"সরকারি প্রজ্ঞাপনের অপেক্ষায়।","cv.holUp":"আসন্ন","cv.hijriNote":"হিজরি তারিখ গণনা করা হয়েছে সারণিভিত্তিক ইসলামি পঞ্জিকায়। বাংলাদেশে ঈদ ও অন্যান্য হিজরি তারিখ চাঁদ দেখার ওপর নির্ভর করে। ২০২৬ সালে দুই ঈদই সারণির তারিখের এক দিন পরে ছিল, তাই “এক দিন পরে” বেছে নিলে সেই ধরন দেখা যাবে। চাঁদ দেখার তারিখ এই ক্যালেন্ডার আগে থেকে হিসাব করে না।","cv.agendaNone":"এই মাসে কিছু নির্ধারিত নেই।","cv.tentTag":"সাময়িক","cv.prevMonth":"আগের","cv.nextMonth":"পরের","cv.lineKey":"প্রতিটি দিনে: উপরে ইংরেজি, মাঝে বাংলা, নিচে হিজরি তারিখ।","cv.hjLbl":"হিজরি তারিখের সেটিং","cv.hjTab":"সারণি","cv.hjPlus":"এক দিন পরে","cv.holSrcs":"সূত্র"});
+
+/* ----- Date systems. Pure functions on 'YYYY-MM-DD' keys; no stored data. ----- */
+const cvJdn = (y,m,d) => { const a = Math.floor((14-m)/12), yy = y+4800-a, mm = m+12*a-3;
+  return d + Math.floor((153*mm+2)/5) + 365*yy + Math.floor(yy/4) - Math.floor(yy/100) + Math.floor(yy/400) - 32045; };
+const cvJdnOf = k => cvJdn(+k.slice(0,4), +k.slice(5,7), +k.slice(8,10));
+const CV_BN_MON = ['বৈশাখ','জ্যৈষ্ঠ','আষাঢ়','শ্রাবণ','ভাদ্র','আশ্বিন','কার্তিক','অগ্রহায়ণ','পৌষ','মাঘ','ফাল্গুন','চৈত্র'];
+/* Bangladesh official Bangla calendar: the year starts on 14 April and every month starts on a fixed Gregorian date
+   (Boishakh 14 Apr, Joishtho 15 May ... Chaitra 15 Mar), so Falgun has 31 days in leap years. */
+const CV_BN_START = [[4,14],[5,15],[6,15],[7,16],[8,16],[9,16],[10,17],[11,16],[12,16],[1,15],[2,14],[3,15]];
+function cvBangla(k){ const j = cvJdnOf(k), y = +k.slice(0,4), by = j >= cvJdn(y,4,14) ? y : y-1;
+  let mi = 0, st = cvJdn(by,4,14);
+  CV_BN_START.forEach(([m,d], i) => { const s = cvJdn(i<=8 ? by : by+1, m, d); if(s<=j){ mi = i; st = s; } });
+  return {y: by-593, mi, d: j-st+1}; }
+/* Hijri: tabular (arithmetical) Islamic calendar, civil epoch. 1 Muharram 1 AH = JDN 1948440. Moon sighting can shift real dates by a day. */
+const CV_HJ_EPOCH = 1948440;
+const CV_HJ_EN = ['Muharram','Safar',"Rabi' al-Awwal","Rabi' al-Thani",'Jumada al-Ula','Jumada al-Akhira','Rajab',"Sha'ban",'Ramadan','Shawwal',"Dhu al-Qi'dah",'Dhu al-Hijjah'];
+const CV_HJ_BN = ['মুহাররম','সফর','রবিউল আউয়াল','রবিউস সানি','জুমাদাল উলা','জুমাদাস সানি','রজব','শাবান','রমজান','শাওয়াল','জিলকদ','জিলহজ'];
+const CV_HJ_AR = ['محرم','صفر','ربيع الأول','ربيع الثاني','جمادى الأولى','جمادى الآخرة','رجب','شعبان','رمضان','شوال','ذو القعدة','ذو الحجة'];
+const cvHjJdn = (y,m,d) => d + Math.ceil(29.5*(m-1)) + (y-1)*354 + Math.floor((3+11*y)/30) + CV_HJ_EPOCH - 1;
+function cvHijri(k){ const j = cvJdnOf(k) - cvHjAdj; let hy = Math.floor((30*(j-CV_HJ_EPOCH)+10646)/10631);
+  while(j < cvHjJdn(hy,1,1)) hy--;
+  while(j >= cvHjJdn(hy+1,1,1)) hy++;
+  let hm = 1; for(let m=2;m<=12;m++){ if(cvHjJdn(hy,m,1) <= j) hm = m; }
+  return {y: hy, mi: hm-1, d: j - cvHjJdn(hy,hm,1) + 1}; }
+const cvBnNum = n => String(n).replace(/[0-9]/g, c => '০১২৩৪৫৬৭৮৯'[c]);
+const cvArNum = n => String(n).replace(/[0-9]/g, c => '٠١٢٣٤٥٦٧٨٩'[c]);
+const cvNum = n => bn() ? cvBnNum(n) : String(n);
+const cvHjName = mi => (bn() ? CV_HJ_BN : CV_HJ_EN)[mi];
+const CV_WD_BN = ['রবিবার','সোমবার','মঙ্গলবার','বুধবার','বৃহস্পতিবার','শুক্রবার','শনিবার'];
+const CV_WD_EN = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+
+/* ----- Government holidays (Bangladesh). Reference data only. Entry: [MM-DD, type, category, English, Bangla]
+   type: g = gazette holiday, e = executive order. category: n = national, r = religious.
+   2026: Ministry of Public Administration notification of 9 Nov 2025, as reported by The Daily Star. Later gazettes can revise some days.
+   Other years: only fixed national dates, marked tentative, until the official list is published. Moon-dependent dates are never guessed. ----- */
+const CV_GOV = {
+  2026: {
+    src: [
+      {label:'Ministry of Public Administration notification, 9 Nov 2025 (The Daily Star)', url:'https://tds-images.thedailystar.net/news/bangladesh/news/govt-announces-official-list-public-holidays-2026-4031596'},
+      {label:'13th election holidays, 22 Jan 2026 (bdnews24)', url:'https://bdnews24.com/politics/1dd8bf72295e'},
+      {label:'Election holiday under executive authority (Prothom Alo)', url:'https://en.prothomalo.com/amp/story/youth/education/hklef0cx9m'},
+      {label:'Eid-ul-Fitr 7-day break, 5 Mar 2026 (bdnews24)', url:'https://bdnews24.com/bangladesh/b0d59f56d051'},
+      {label:'Eid-ul-Fitr 7-day break, 17-23 Mar 2026 (Dhaka Tribune)', url:'https://www.dhakatribune.com/bangladesh/404739/govt-approves-7-day-eid-holiday'},
+      {label:'Eid-ul-Azha 7-day break, 14 May 2026 (bdnews24)', url:'https://bdnews24.com/bangladesh/30e52e9565f5'},
+      {label:'Durga Puja break and 7 November, 5 Oct 2026 (bdnews24)', url:'https://bdnews24.com/bangladesh/7qfkzxvuxk'}
+    ],
+    rows: [
+      // Base list: 9 Nov 2025 notification (14 general, 13 executive-order days, one date listed twice)
+      ['02-21','g','n','Shaheed Day and International Mother Language Day','শহীদ দিবস ও আন্তর্জাতিক মাতৃভাষা দিবস'],
+      ['03-20','g','r','Jumatul Bida','জুমাতুল বিদা'],
+      ['03-21','g','r','Eid-ul-Fitr','ঈদুল ফিতর'],
+      ['03-26','g','n','Independence and National Day','স্বাধীনতা ও জাতীয় দিবস'],
+      ['05-01','g','n','May Day','মে দিবস'],
+      ['05-01','g','r','Buddha Purnima (Boishakhi Purnima)','বুদ্ধ পূর্ণিমা (বৈশাখী পূর্ণিমা)'],
+      ['05-28','g','r','Eid-ul-Azha','ঈদুল আযহা'],
+      ['08-05','g','n','July Mass Uprising Day','জুলাই গণঅভ্যুত্থান দিবস'],
+      ['08-26','g','r','Eid-e-Miladunnabi (PBUH)','ঈদে মিলাদুন্নবী (সা.)'],
+      ['09-04','g','r','Janmashtami','জন্মাষ্টমী'],
+      ['10-21','g','r','Durga Puja (Bijoya Dashami)','দুর্গা পূজা (বিজয়া দশমী)'],
+      ['12-16','g','n','Victory Day','বিজয় দিবস'],
+      ['12-25','g','r','Christmas Day','বড়দিন'],
+      ['02-04','e','r','Shab-e-Barat','শবে বরাত'],
+      ['03-17','e','r','Shab-e-Qadr','শবে কদর'],
+      ['03-19','e','r','Eid-ul-Fitr (day before Eid)','ঈদুল ফিতরের আগের দিন'],
+      ['03-22','e','r','Eid-ul-Fitr (day after Eid)','ঈদুল ফিতরের পরের দিন'],
+      ['03-23','e','r','Eid-ul-Fitr (day after Eid)','ঈদুল ফিতরের পরের দিন'],
+      ['04-14','e','n','Bangla New Year (Pohela Boishakh)','পহেলা বৈশাখ (বাংলা নববর্ষ)'],
+      ['05-26','e','r','Eid-ul-Azha (day before Eid)','ঈদুল আযহার আগের দিন'],
+      ['05-27','e','r','Eid-ul-Azha (day before Eid)','ঈদুল আযহার আগের দিন'],
+      ['05-29','e','r','Eid-ul-Azha (day after Eid)','ঈদুল আযহার পরের দিন'],
+      ['05-30','e','r','Eid-ul-Azha (day after Eid)','ঈদুল আযহার পরের দিন'],
+      ['05-31','e','r','Eid-ul-Azha (day after Eid)','ঈদুল আযহার পরের দিন'],
+      ['06-26','e','r','Ashura','আশুরা'],
+      ['10-20','e','r','Durga Puja (Mahanabami)','দুর্গা পূজা (মহানবমী)'],
+      // Amendments (types: g = notified general holiday, e = added by government order)
+      ['02-11','e','n','13th National Parliament Election (day before)','ত্রয়োদশ জাতীয় সংসদ নির্বাচনের আগের দিন'],
+      ['02-12','e','n','13th National Parliament Election and Referendum','ত্রয়োদশ জাতীয় সংসদ নির্বাচন ও গণভোট'],
+      ['03-18','e','r','Eid-ul-Fitr holiday (additional day)','ঈদুল ফিতরের অতিরিক্ত ছুটি'],
+      ['05-25','e','r','Eid-ul-Azha holiday (seven-day break starts)','ঈদুল আযহার ছুটি (সাত দিনের ছুটির শুরু)'],
+      ['10-22','e','r','Durga Puja holiday (additional day)','দুর্গা পূজার অতিরিক্ত ছুটি'],
+      ['11-07','g','n','National Revolution and Solidarity Day','জাতীয় বিপ্লব ও সংহতি দিবস']
+    ]
+  }
+};
+const CV_GOV_FIXED = [
+  ['02-21','n','Shaheed Day and International Mother Language Day','শহীদ দিবস ও আন্তর্জাতিক মাতৃভাষা দিবস'],
+  ['03-26','n','Independence and National Day','স্বাধীনতা ও জাতীয় দিবস'],
+  ['04-14','n','Bangla New Year (Pohela Boishakh)','পহেলা বৈশাখ (বাংলা নববর্ষ)'],
+  ['05-01','n','May Day','মে দিবস'],
+  ['08-05','n','July Mass Uprising Day','জুলাই গণঅভ্যুত্থান দিবস'],
+  ['11-07','n','National Revolution and Solidarity Day','জাতীয় বিপ্লব ও সংহতি দিবস'],
+  ['12-16','n','Victory Day','বিজয় দিবস'],
+  ['12-25','r','Christmas Day','বড়দিন']
+];
+const cvGovCache = {};
+function cvHolidays(y){
+  if(cvGovCache[y]) return cvGovCache[y];
+  let res;
+  if(CV_GOV[y]) res = {status:'official', src: CV_GOV[y].src, items: CV_GOV[y].rows.map(r => ({d:`${y}-${r[0]}`, t:r[1], c:r[2], en:r[3], bn:r[4]})).sort((a,b) => a.d.localeCompare(b.d))};
+  else if(y > new Date().getFullYear()) res = {status:'tentative', src:[], items: CV_GOV_FIXED.map(r => ({d:`${y}-${r[0]}`, t:'f', c:r[1], en:r[2], bn:r[3]}))};
+  else res = {status:'none', src:[], items: []};
+  return (cvGovCache[y] = res); }
+const cvHolsOn = k => cvHolidays(+k.slice(0,4)).items.filter(h => h.d===k);
+const cvHolMeta = h => [tr(h.c==='n' ? 'cv.natCat' : 'cv.relCat'), tr(h.t==='g' ? 'cv.typeG' : h.t==='e' ? 'cv.typeE' : 'cv.typeF')].join(' · ');
+const cvHolNote = h => h.t==='f' ? tr('cv.noteTent') : h.t==='e' ? tr('cv.noteExec') : h.c==='r' ? tr('cv.noteMoon') : tr('cv.noteNat');
+
+/* ===== Calendar: compact month grid. Labels are English. Tap a holiday or item to see what it is. ===== */
+const CV_EN_MON = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const CV_EN_WD = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const CV_BN_EN = ['Boishakh','Jaishtha','Ashar','Shrabon','Bhadra','Ashwin','Kartik','Agrahayan','Poush','Magh','Falgun','Chaitra'];
+const CV_KIND_EN = {plan:'Study plan', task:'Task due', exam:'Exam'};
+function calPrefGet(k, d){ try{ const v = localStorage.getItem('studyTracker.cal.'+k); return v===null ? d : v; }catch(e){ return d; } }
+function calPrefSet(k, v){ try{ localStorage.setItem('studyTracker.cal.'+k, v); }catch(e){} }
+let cvHjAdj = calPrefGet('hjadj','0') === '1' ? 1 : 0;   /* 0 = tabular Hijri; 1 = moon-sighted, one day later */
+const CLV = {y: new Date().getFullYear(), m: new Date().getMonth(), sel: today(), tip: null, focus: null, view: calPrefGet('view','month') === 'year' ? 'year' : 'month'};
+
+function calEvents(){ const map = {}, add = (k, ev) => { (map[k] = map[k] || []).push(ev); };
+  PL.plans.forEach(p => add(p.date, {kind:'plan', id:p.id, title:p.title, time:p.start, end:p.end, st:p.st, done:p.st==='done'||p.st==='skip'}));
+  PL.tasks.forEach(t => { if(t.due) add(t.due, {kind:'task', id:t.id, title:t.title, time:t.time||'', st:t.st, done:t.st==='done'}); });
+  PL.exams.forEach(x => add(x.date, {kind:'exam', id:x.id, title:x.name, time:x.time||'', room:x.room||'', done:false}));
+  Object.values(map).forEach(a => a.sort((x,y) => (x.time||'99:99').localeCompare(y.time||'99:99') || x.title.localeCompare(y.title)));
+  return map; }
+
+function cvHasInfo(k, ev){ return cvHolsOn(k).length > 0 || (ev[k] || []).length > 0; }
+function cvKeyLabel(k, ev){ const p = parse(k), parts = [`${CV_EN_WD[p.getDay()]}, ${p.getDate()} ${CV_EN_MON[p.getMonth()]} ${p.getFullYear()}`];
+  cvHolsOn(k).forEach(h => parts.push(h.en)); (ev[k] || []).forEach(x => parts.push(x.title)); return parts.join(': '); }
+function cvTipHtml(k, ev){ const rows = cvHolsOn(k).map(h => `<p><b>${esc(h.en)}</b><small>Government holiday · ${h.c==='r' ? 'Religious' : 'National'}${h.t==='f' ? ' · tentative' : ''}</small></p>`);
+  (ev[k] || []).forEach(x => rows.push(`<p class="cv-tp-i"><i class="cv-dot cv-k-${x.kind}" aria-hidden="true"></i><span><b>${esc(x.title)}</b><small>${esc(CV_KIND_EN[x.kind] + (x.time ? ' · ' + x.time : ''))}</small></span></p>`));
+  return rows.join(''); }
+function cvCell(k, ev, td){ if(!k) return '<span class="cv-e" aria-hidden="true"></span>';
+  const p = parse(k), hol = cvHolsOn(k), list = ev[k] || [];
+  const cls = ['cv-c', k===td ? 'is-today' : '', k===CLV.sel ? 'is-sel' : '', (p.getDay()===5 || p.getDay()===6) ? 'is-wk' : '', hol.length ? 'is-hol' : ''].filter(Boolean).join(' ');
+  const dots = ['plan','task','exam'].filter(kd => list.some(x => x.kind===kd)).map(kd => `<i class="cv-dot cv-k-${kd}"></i>`).join('') + (hol.length ? '<i class="cv-dot cv-k-hol"></i>' : '');
+  return `<button type="button" class="${cls}" data-day="${k}" aria-pressed="${k===CLV.sel}" aria-label="${esc(cvKeyLabel(k, ev))}"><b>${p.getDate()}</b><span class="cv-dots" aria-hidden="true">${dots}</span></button>`; }
+function cvPlaceTip(){ const v = $('v-calendar'), tip = v.querySelector('.cv-tip'), card = v.querySelector('.cv-card');
+  const cell = tip && v.querySelector(`button.cv-c[data-day="${CLV.tip}"]`); if(!cell) return;
+  const c = cell.getBoundingClientRect(), k = card.getBoundingClientRect(), tw = tip.offsetWidth, th = tip.offsetHeight;
+  let left = c.left - k.left + c.width/2 - tw/2; left = Math.max(8, Math.min(left, k.width - tw - 8));
+  let top = c.top - k.top - th - 8; if(top < 8) top = c.bottom - k.top + 8;
+  tip.style.left = left + 'px'; tip.style.top = top + 'px'; }
+function cvCloseTip(){ if(!CLV.tip) return; CLV.tip = null; const t = $('v-calendar').querySelector('.cv-tip'); if(t) t.remove(); }
+
+function cvMonthNames(y, m){ const dim = new Date(y, m+1, 0).getDate(), f = dkey(new Date(y, m, 1)), l = dkey(new Date(y, m, dim));
+  const a = cvBangla(f), b = cvBangla(l), ha = cvHijri(f), hb = cvHijri(l);
+  return {bn: a.mi===b.mi ? CV_BN_EN[a.mi] : `${CV_BN_EN[a.mi]} – ${CV_BN_EN[b.mi]}`,
+          hj: ha.mi===hb.mi ? CV_HJ_EN[ha.mi] : `${CV_HJ_EN[ha.mi]} – ${CV_HJ_EN[hb.mi]}`}; }
+function cvGridCells(y, m){ const dim = new Date(y, m+1, 0).getDate(), cells = [];
+  for(let i = 0; i < new Date(y, m, 1).getDay(); i++) cells.push(null);
+  for(let d = 1; d <= dim; d++) cells.push(dkey(new Date(y, m, d)));
+  while(cells.length % 7) cells.push(null); return cells; }
+function cvWdRow(){ return `<div class="cv-wd" aria-hidden="true">${CV_EN_WD.map(x => `<span>${x}</span>`).join('')}</div>`; }
+function cvMini(y, m, ev, td){ const n = cvMonthNames(y, m);
+  return `<section class="cv-ym" aria-label="${CV_EN_MON[m]} ${y}"><div class="cv-ym-h"><b>${CV_EN_MON[m]}</b><span class="cv-bn-m">Bangla: ${esc(n.bn)}</span><span class="cv-hj-m">Hijri: ${esc(n.hj)}</span></div>`
+   + cvWdRow() + `<div class="cv-grid cv-mini">${cvGridCells(y, m).map(k => cvCell(k, ev, td)).join('')}</div></section>`; }
+function cvFoot(){ return `<div class="cv-foot"><div class="cv-legend"><span><i class="cv-dot cv-k-plan"></i>Plan</span><span><i class="cv-dot cv-k-task"></i>Task</span><span><i class="cv-dot cv-k-exam"></i>Exam</span><span><i class="cv-dot cv-k-hol"></i>Holiday</span></div>`
+   + `<div class="cv-hjseg" role="group" aria-label="Hijri day"><button type="button" class="cv-hjb" data-hjadj="0" aria-pressed="${cvHjAdj===0}">Tabular</button><button type="button" class="cv-hjb" data-hjadj="1" aria-pressed="${cvHjAdj===1}">+1 day</button></div></div>`; }
+
+function renderCalendar(){ const v = $('v-calendar'); if(v.hidden) return;
+  const prevScroll = v.querySelector('.cv-year'), st = prevScroll ? prevScroll.scrollTop : 0;
+  const ev = calEvents(), td = today(), yr = CLV.view === 'year', y = CLV.y, m = CLV.m;
+  const views = `<div class="seg cv-views" role="group" aria-label="Calendar view"><button type="button" data-cview="month" class="${yr ? '' : 'on'}" aria-pressed="${!yr}">Month</button><button type="button" data-cview="year" class="${yr ? 'on' : ''}" aria-pressed="${yr}">Year</button></div>`;
+  let body;
+  if(yr){
+    body = `<div class="cv-hd"><button type="button" class="cv-nav" data-cnav="-1" aria-label="Previous year">&lsaquo;</button><div class="cv-tt"><h3>${y}</h3></div><button type="button" class="cv-nav" data-cnav="1" aria-label="Next year">&rsaquo;</button></div>`
+     + `<div class="cv-year" role="region" aria-label="All months of ${y}" tabindex="0"><div class="cv-yrgrid">${Array.from({length: 12}, (_, i) => cvMini(y, i, ev, td)).join('')}</div></div>`;
+  } else {
+    const n = cvMonthNames(y, m), tip = CLV.tip && cvHasInfo(CLV.tip, ev) ? `<div class="cv-tip" role="status">${cvTipHtml(CLV.tip, ev)}</div>` : '';
+    body = `<div class="cv-hd"><button type="button" class="cv-nav" data-cnav="-1" aria-label="Previous month">&lsaquo;</button>`
+     + `<div class="cv-tt"><h3>${CV_EN_MON[m]} ${y}</h3><p class="cv-lunar"><span class="cv-bn-m">Bangla: ${esc(n.bn)}</span><span class="cv-hj-m">Hijri: ${esc(n.hj)}</span></p></div>`
+     + `<button type="button" class="cv-nav" data-cnav="1" aria-label="Next month">&rsaquo;</button></div>`
+     + cvWdRow() + `<div class="cv-grid" role="group" aria-label="${CV_EN_MON[m]} ${y}">${cvGridCells(y, m).map(k => cvCell(k, ev, td)).join('')}</div>` + tip;
+  }
+  v.innerHTML = `<div class="ph"><div><h2>Calendar</h2></div><button type="button" class="primary sm" data-cnav="0">Today</button></div>`
+   + views + `<section class="card cv-card" aria-label="Calendar">` + body + cvFoot() + `</section>`;
+  const ns = v.querySelector('.cv-year'); if(ns) ns.scrollTop = st;
+  if(CLV.focus){ const f = v.querySelector(`[data-day="${CLV.focus}"]`); CLV.focus = null; if(f) f.focus(); }
+  cvPlaceTip(); }
+
+$('v-calendar').onclick = e => { const b = e.target.closest('button'); if(!b || b.disabled) return;
+  if(b.dataset.cview){ CLV.view = b.dataset.cview; calPrefSet('view', CLV.view); CLV.tip = null; return renderCalendar(); }
+  if(b.dataset.cnav!==undefined){ const n = Number(b.dataset.cnav);
+    if(n===0){ const t = new Date(); CLV.y = t.getFullYear(); CLV.m = t.getMonth(); CLV.sel = today(); }
+    else if(CLV.view==='year'){ CLV.y += n; }
+    else { const d = new Date(CLV.y, CLV.m + n, 1); CLV.y = d.getFullYear(); CLV.m = d.getMonth(); }
+    CLV.tip = null; return renderCalendar(); }
+  if(b.dataset.hjadj!==undefined){ cvHjAdj = Number(b.dataset.hjadj); calPrefSet('hjadj', String(cvHjAdj)); return renderCalendar(); }
+  if(b.dataset.day){ const k = b.dataset.day, ev = calEvents(), p = parse(k);
+    if(CLV.view==='year'){ CLV.view = 'month'; calPrefSet('view', 'month'); CLV.y = p.getFullYear(); CLV.m = p.getMonth(); CLV.tip = cvHasInfo(k, ev) ? k : null; }
+    else CLV.tip = (CLV.tip===k || !cvHasInfo(k, ev)) ? null : k;
+    CLV.sel = k; return renderCalendar(); } };
+$('v-calendar').onkeydown = e => { const b = e.target.closest && e.target.closest('button[data-day]'); if(!b) return;
+  const step = {ArrowLeft:-1, ArrowRight:1, ArrowUp:-7, ArrowDown:7}[e.key]; if(step===undefined) return;
+  e.preventDefault(); const k = shiftDay(b.dataset.day, step), p = parse(k);
+  CLV.y = p.getFullYear(); CLV.m = p.getMonth(); CLV.sel = k; CLV.tip = null; CLV.focus = k; renderCalendar(); };
+document.addEventListener('keydown', e => { if(e.key==='Escape') cvCloseTip(); });
+document.addEventListener('click', e => { if(CLV.tip && e.target.isConnected && !e.target.closest('#v-calendar')) cvCloseTip(); });
+window.addEventListener('resize', () => { if(CLV.tip) cvPlaceTip(); });
+
+/* ===== study library. Resources live in PL.lib, separate from notes, and link to subjects by ID ===== */
+const LB = {q:'', sid:'', type:'', fav:false, sort:'title'};
+const libSort = (a,b) => LB.sort==='new' ? (b.date.localeCompare(a.date) || b.created.localeCompare(a.created)) : a.title.localeCompare(b.title);
+function libList(){ const q = lc(LB.q.trim()); return PL.lib.filter(r => (!q || lc(r.title).includes(q) || lc(r.desc).includes(q) || r.tags.some(t => lc(t).includes(q))) && (!LB.sid || r.sid===LB.sid) && (!LB.type || r.type===LB.type) && (!LB.fav || r.fav)).sort(libSort); }
+function resCard(r){ const s = subOf(r.sid);
+  return `<article class="card res" data-id="${esc(r.id)}"><div class="exh"><div><small class="small">${esc(tr('lib.t.'+r.type))}${s?' · '+esc(s.icon+' '+s.name):''}</small><b>${esc(r.title)}</b></div><button type="button" class="star" data-a="fav" aria-pressed="${r.fav}" aria-label="${esc(tr(r.fav?'lib.unfav':'lib.fav'))}"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="${r.fav?'currentColor':'none'}" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/></svg></button></div>`
+  + (r.desc ? `<p class="small">${esc(r.desc)}</p>` : '') + (r.loc ? `<p class="small">${esc(tr('lib.loc'))}: ${esc(r.loc)}</p>` : '')
+  + (r.tags.length ? `<div class="tags">${r.tags.map(t => `<span class="tag">${esc(t)}</span>`).join('')}</div>` : '')
+  + `<div class="row">${r.url ? `<a class="primary sbtn" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">${esc(tr('lib.open'))}</a>` : ''}<button type="button" data-a="edit">${esc(tr('exam.edit'))}</button><button type="button" data-a="del">${esc(tr('exam.del'))}</button></div></article>`; }
+function renderLibrary(){ const v = $('v-library'); if(v.hidden) return; const all = PL.lib, list = libList();
+  const sel = (id, arr, cur, all0, lab) => `<select id="${id}" aria-label="${esc(lab)}"><option value="">${esc(all0)}</option>${arr.map(([val,l]) => `<option value="${esc(val)}"${val===cur?' selected':''}>${esc(l)}</option>`).join('')}</select>`;
+  v.innerHTML = `<div class="ph"><div><h2>${esc(tr('lib.title'))}</h2><p class="small">${esc(tr('lib.desc'))}</p></div><button type="button" class="primary" data-a="add">${esc(tr('lib.add'))}</button></div>`
+  + (all.length ? `<div class="tb">${toolbarInput('lQ', tr('lib.search'), LB.q)}<div class="fl">`
+    + sel('lSub', PL.subjects.map(s => [s.id, s.icon+' '+s.name]), LB.sid, tr('c.allSubj'), tr('c.allSubj'))
+    + sel('lType', LIB_TYPE.map(t => [t, tr('lib.t.'+t)]), LB.type, tr('lib.allType'), tr('lib.allType'))
+    + sel('lFav', [['fav', tr('lib.onlyFav')]], LB.fav?'fav':'', tr('lib.allRes'), tr('lib.allRes'))
+    + `<select id="lSort" aria-label="${esc(tr('c.sort'))}">${[['title','lib.sortTitle'],['new','site.sortNew']].map(([k,l]) => `<option value="${k}"${k===LB.sort?' selected':''}>${esc(tr(l))}</option>`).join('')}</select></div></div>` : '')
+  + (!all.length ? `<div class="card empty"><b>${esc(tr('lib.none'))}</b><p class="small">${esc(tr('lib.noneD'))}</p><button type="button" class="primary" data-a="add">${esc(tr('lib.add'))}</button></div>`
+  : !list.length ? `<p class="small">${esc(tr('lib.noMatch'))}</p>` : `<div class="sgrid">${list.map(resCard).join('')}</div>`);
+  const q = $('lQ'); if(q) q.oninput = e => { LB.q = e.target.value; keepFocus(renderLibrary); };
+  [['lSub','sid'],['lType','type'],['lFav','fav'],['lSort','sort']].forEach(([id,k]) => { const el = $(id); if(el) el.onchange = e => { const val = e.target.value; LB[k] = k==='fav' ? val==='fav' : val; renderLibrary(); }; });
+}
+function libForm(r){ const d = r || {}; openForm(r?tr('lib.edit'):tr('lib.new'),
+  fld(tr('lib.name'),`<input type="text" name="title" maxlength="120" value="${esc(d.title||'')}">`)
+  +`<div class="row">${fld(tr('lib.type'),optSel('type',LIB_TYPE.map(t => [t, tr('lib.t.'+t)]), d.type||'link'))}${fld(tr('subj.title'),subSel('sid', d.sid||LB.sid||''))}</div>`
+  +fld(tr('lib.url'),`<input type="url" name="url" maxlength="500" placeholder="https://" value="${esc(d.url||'')}">`)
+  +fld(tr('lib.locF'),`<input type="text" name="loc" maxlength="200" value="${esc(d.loc||'')}">`)
+  +fld(tr('lib.tags'),`<input type="text" name="tags" maxlength="200" value="${esc((d.tags||[]).join(', '))}">`)
+  +fld(tr('task.descF'),`<textarea name="desc" maxlength="600">${esc(d.desc||'')}</textarea>`), null, fd => {
+    const title = str(fd.get('title'),120); if(!title) return tr('lib.nameReq');
+    const url = cleanUrl(fd.get('url')); if(url===null) return tr('lib.urlBad');
+    const loc = str(fd.get('loc'),200); if(!url && !loc) return tr('lib.need');
+    if(url && PL.lib.some(x => x!==r && x.url===url)) return tr('lib.dup');
+    const rec = cleanRes({id:r&&r.id, title, type:fd.get('type'), url, loc, sid:fd.get('sid'), desc:fd.get('desc'), tags:String(fd.get('tags')||'').split(',').map(t => str(t,24)).filter(Boolean), fav:r?r.fav:false, date:r?r.date:today(), created:r&&r.created});
+    if(!rec) return tr('lib.need');
+    if(r) PL.lib[PL.lib.indexOf(r)] = rec; else PL.lib.push(rec);
+    if(!savePlan()) return tr('c.storage'); planRender(); toast(tr('c.saved')); }); }
+$('v-library').onclick = async e => { const b = e.target.closest('button'); if(!b) return;
+  if(b.dataset.a==='add') return libForm();
+  const card = b.closest('[data-id]'), r = card && PL.lib.find(x => x.id===card.dataset.id); if(!r) return;
+  if(b.dataset.a==='fav'){ r.fav = !r.fav; if(savePlan()) planRender(); }
+  else if(b.dataset.a==='edit') libForm(r);
+  else if(b.dataset.a==='del'){ if(!(await ask(tr('lib.delConfirm',{n:r.title}), tr('c.delete')))) return; PL.lib = PL.lib.filter(x => x!==r); if(savePlan()){ planRender(); toast(tr('c.deleted')); } } };
+/* Focus Timer link. Minutes from completed focus blocks add up on the plan; the plan is completed once its planned time is reached */
+const toMin = t => { const [h,m] = t.split(':').map(Number); return h*60+m; };
+function linkPlanTime(pid, min){ if(!pid) return; let plans;
+  try{ plans = PL.plans; }catch(e){ window.__pendingPlanLink = {pid, min}; return; }   // the timer can finish a block during startup, before the plan store exists: applied at the end of startup
+  const p = plans.find(x => x.id===pid); if(!p || p.st==='skip') return;
+  p.spent = (p.spent||0) + min;
+  if(p.spent >= toMin(p.end)-toMin(p.start)) p.st = 'done'; else if(p.st==='planned') p.st = 'prog';
+  if(savePlan()) planRender(); }
+function startPlanFocus(p){ if(locked()) return;
+  if(T.run || (T.phase==='focus' && T.runId)) return toast(tr('pf.busy'));
+  const s = subOf(p.sid); if(s) legacyName(s.name); fillSubjects();
+  if(T.phase!=='focus') tSet('focus');
+  $('tSub').value = s && state.subjects.includes(s.name) ? s.name : '';
+  T.pid = p.id; go('focus'); $('tStart').click();
+  if(!T.run){ T.pid = ''; return; }
+  if(p.st==='planned'){ p.st = 'prog'; if(savePlan()) planRender(); } }
+if(window.__pendingPlanLink){ const pl = window.__pendingPlanLink; window.__pendingPlanLink = null; linkPlanTime(pl.pid, pl.min); }
+
+/* ===== notifications, reminders, timer preferences and import modes ===== */
+/* Service worker: Android-compatible notifications, and opens the right screen when a notification is tapped */
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('sw.js').then(r => { SW_REG = r; OS_REG_DONE = true; flushOsQueue(); syncRemUI(); }).catch(e => { OS_ERR = String((e && e.message) || e); OS_REG_DONE = true; flushOsQueue(); syncRemUI(); });
+  navigator.serviceWorker.addEventListener('message', e => { if(e.data && e.data.type === 'nav') go(SAFE_DEST(e.data.dest)); });
+}
+const NFV = {f:'all'};
+function syncTimerPrefs(){ $('cF').value = state.settings.focusMin; $('cB').value = state.settings.breakMin; }
+/* Stores a notification once. The key is stable, so the same reminder is never created twice, even after a refresh or after the user deleted it */
+/* Another open tab may already have fired this reminder: its saved list is checked before a second copy is made */
+function firedInAnotherTab(key){
+  try{ const raw = localStorage.getItem(PLK); if(!raw) return false; const f = JSON.parse(raw); return Array.isArray(f.nseen) && f.nseen.includes(key); }
+  catch(e){ return false; }
+}
+function fireNote(kind, key, title, msg, recId){
+  if(PL.nseen.includes(key)) return false;
+  if(firedInAnotherTab(key)){ PL.nseen.push(key); if(PL.nseen.length > 800) PL.nseen.splice(0, PL.nseen.length - 800); return false; }
+  PL.nseen.push(key); if(PL.nseen.length > 800) PL.nseen.splice(0, PL.nseen.length - 800);
+  PL.notif.push({id: rid('f'), kind, title, msg, at: new Date().toISOString(), read: false, key, dest: NF_DEST[kind], rid: recId || ''}); updBell();
+  if(PL.notif.length > 300){ let drop = PL.notif.length - 300; PL.notif = PL.notif.filter(x => { if(drop > 0 && x.read){ drop--; return false; } return true; }); }
+  if(PL.notif.length > 500) PL.notif = PL.notif.slice(-500);
+  osNotify(title, msg, key, NF_DEST[kind]);
+  return true; }
+/* Reminder rules. Only runs when reminders are on, and each category follows its own switch */
+function checkReminders(){
+  if(LOCKED || !state || !PL || !state.settings.remOn) { updateNotifBadge(); renderNotifs(); return; }
+  const S = state.settings, now = new Date(), td = today(), nm = now.getHours()*60 + now.getMinutes(), nowHM = pad(now.getHours()) + ':' + pad(now.getMinutes());
+  let n = 0; const go1 = (kind, key, title, msg, recId) => { if(n < 5 && fireNote(kind, key, title, msg, recId)) n++; };
+  if(S.remTask) PL.tasks.forEach(t => { if(t.st==='done' || !t.due) return;
+    if(t.due < td) go1('task', 'task:over:' + t.id + ':' + t.due, tr('nf.taskOverT',{n:t.title}), tr('nf.taskOverM',{d:fmtDate(t.due)}), t.id);
+    else if(t.due === td && nowHM >= (t.time || TASK_DEFAULT_HM)) go1('task', 'task:today:' + t.id + ':' + t.due, tr('nf.taskTodayT',{n:t.title}), tr('nf.taskTodayM'), t.id); });
+  if(S.remRev) PL.revs.forEach(r => { if(r.done || !r.next) return;
+    if(r.next < td) go1('revision', 'rev:over:' + r.id + ':' + r.next, tr('nf.revOverT',{n:r.title}), tr('nf.revOverM'), r.id);
+    else if(r.next === td && nowHM >= TASK_DEFAULT_HM) go1('revision', 'rev:today:' + r.id + ':' + r.next, tr('nf.revTodayT',{n:r.title}), tr('nf.revTodayM'), r.id); });
+  if(S.remExam) PL.exams.forEach(x => { const d = examDays(x); if(d < 0) return;
+    if(d===0 || d===1 || d===S.examLead) go1('exam', 'exam:' + x.id + ':' + x.date + ':' + d, tr('nf.examT',{n:x.name}), tr('nf.examM',{when: examLabel(x)}), x.id); });
+  if(S.remPlan) PL.plans.forEach(p => { if(p.date!==td || p.st==='done' || p.st==='skip') return;
+    if(nm >= toMin(p.start) - S.planLead && nm < toMin(p.end)) go1('plan', 'plan:' + p.id + ':' + p.date + ':' + p.start + ':' + p.end, tr('nf.planT',{n:p.title}), tr('nf.planM',{t:p.start}), p.id);
+    if(p.st !== 'done' && nm >= toMin(p.end) && nm < toMin(p.end) + 5) go1('plan', 'planend:' + p.id + ':' + p.date + ':' + p.end, tr('nf.planEndT',{n:p.title}), tr('nf.planEndM'), p.id); });
+  if(S.remGoal && nowHM >= S.goalTime && dayTotal(td) < S.targetMin) go1('goal', 'goal:' + td, tr('nf.goalT'), tr('nf.goalM',{n: Math.round(S.targetMin - dayTotal(td))}), '');
+  { const R = PL.routine; if(R && R.active){ const wd = rtWd(td); R.blocks.forEach(b => { if(b.kind === 'study' && b.wd === wd && nowHM >= b.start && nowHM < b.end) go1('routine', 'routine:' + td + ':' + b.id, tr('nf.rtT', {t: rtChipLabel(b)}), tr('nf.rtM', {s: b.start, e: b.end}), ''); }); } }
+  { const pend = (PL.dayPlans || []).filter(x => x.date === td && !x.done), cfg = PL.dayPlanCfg || {};
+    if(cfg.remAt && nowHM >= cfg.remAt && pend.length) go1('dayplan', 'dayplan:' + td, tr('nf.dpT'), tr('nf.dpM', {t: pend.map(x => { const s = PL.subjects.find(y => y.id === x.sid); return (s ? s.name + ': ' : '') + x.text; }).join('; ').slice(0,140)}), ''); }
+  (PL.habits || []).forEach(h => { if(h.t && nowHM >= h.t && h.log.indexOf(td) === -1) go1('habit', 'habit:' + h.id + ':' + td, tr('nf.habitT',{n:h.name}), tr('nf.habitM'), h.id); });
+  if(S.studyRemT && nowHM >= S.studyRemT && dayTotal(td) === 0) go1('study', 'study:' + td, tr('nf.studyT'), tr('nf.studyM'), '');
+  if(S.remBk && state.sessions.length && (!S.lastExp || S.lastExp.slice(0,10) < shiftDay(td,-14))) go1('backup', 'backup:' + td.slice(0,7), tr('nf.backupT'), tr('nf.backupM'), '');
+  if(n) savePlan();
+  updateNotifBadge(); renderNotifs(); }
+function updateNotifBadge(){ const b = $('moreBadge'); if(!b || !PL) return; const u = PL.notif.filter(x => !x.read).length; b.hidden = !u; b.textContent = u > 99 ? '99+' : String(u); }
+function openNotifTarget(n){
+  const ok = n.dest==='home' || n.dest==='settings' || (n.dest==='tasks' && PL.tasks.some(x => x.id===n.rid)) || (n.dest==='exams' && PL.exams.some(x => x.id===n.rid)) || (n.dest==='planner' && PL.plans.some(x => x.id===n.rid)) || (n.dest==='revision' && PL.revs.some(x => x.id===n.rid)) || (n.dest==='habits' && PL.habits.some(x => x.id===n.rid));
+  if(!ok){ planRender(); return toast(tr('nf.gone')); }
+  if(n.dest==='planner'){ PLV.mode = 'day'; PLV.day = PL.plans.find(x => x.id===n.rid).date; }
+  go(n.dest); }
+function notifCard(n){ return `<article class="card nfc${n.read?'':' unread'}" data-id="${esc(n.id)}"><div class="exh"><div><small class="small">${esc(tr('nf.k.'+n.kind))} · ${esc(fmtWhen(n.at))}</small><b>${esc(n.title)}</b></div>${n.read?'':`<span class="ndot" aria-label="${esc(tr('nf.unread'))}"></span>`}</div>`
+  + `<p class="small">${esc(n.msg)}</p><div class="row"><button type="button" data-a="open">${esc(tr('nf.open'))}</button><button type="button" data-a="toggle">${esc(tr(n.read?'nf.markUnread':'nf.markRead'))}</button><button type="button" data-a="del">${esc(tr('exam.del'))}</button></div></article>`; }
+function renderNotifs(){ const v = $('v-notifs'); if(!v || v.hidden) return; const all = PL.notif, unread = all.filter(x => !x.read).length;
+  const list = all.filter(x => NFV.f==='all' || !x.read).sort((a,b) => b.at.localeCompare(a.at));
+  v.innerHTML = `<div class="ph"><div><h2>${esc(tr('nf.title'))}</h2><p class="small">${esc(tr('nf.desc'))}</p></div></div>`
+  + (all.length ? `<div class="row nfbar"><button type="button" data-a="readall"${unread?'':' disabled'}>${esc(tr('nf.markAll'))}</button><button type="button" class="danger" data-a="clear">${esc(tr('nf.clear'))}</button></div>`
+    + `<div class="seg" role="group">${[['all','nf.all'],['unread','nf.unread']].map(([k,l]) => `<button type="button" data-nf="${k}" class="${NFV.f===k?'on':''}" aria-pressed="${NFV.f===k}">${esc(tr(l))}</button>`).join('')}</div>` : '')
+  + (!all.length ? `<div class="card empty"><b>${esc(tr('nf.none'))}</b><p class="small">${esc(tr('nf.noneD'))}</p></div>`
+  : !list.length ? `<p class="small">${esc(tr('nf.noUnread'))}</p>` : list.map(notifCard).join('')); }
+$('v-notifs').onclick = async e => { const b = e.target.closest('button'); if(!b) return;
+  if(b.dataset.nf){ NFV.f = b.dataset.nf; return renderNotifs(); }
+  if(b.dataset.a==='readall'){ PL.notif.forEach(x => { x.read = true; }); savePlan(); return planRender(); }
+  if(b.dataset.a==='clear'){ if(!(await ask(tr('nf.clearConfirm'), tr('nf.clear')))) return; PL.notif = []; savePlan(); return planRender(); }
+  const card = b.closest('[data-id]'), n = card && PL.notif.find(x => x.id===card.dataset.id); if(!n) return;
+  if(b.dataset.a==='toggle'){ n.read = !n.read; savePlan(); return planRender(); }
+  if(b.dataset.a==='del'){ PL.notif = PL.notif.filter(x => x!==n); savePlan(); return planRender(); }
+  if(b.dataset.a==='open'){ n.read = true; savePlan(); return openNotifTarget(n); } };
+(function(){ const mb = $('menuNotifs'), bd = document.createElement('span'); bd.id = 'moreBadge'; bd.className = 'nbadge'; bd.hidden = true; mb.appendChild(bd); })();
+
+/* Settings controls: every control writes a validated value, saves it, and re-checks reminders */
+function persistSettings(){ persist(); syncRemUI(); checkReminders(); }
+function syncRemUI(){ const S = state.settings;
+  const set = (id, v) => { const el = $(id); if(!el || document.activeElement===el) return; if(el.type==='checkbox') el.checked = v; else el.value = v; };
+  ['remOn','remTask','remExam','remPlan','remGoal','remBk','remRev'].forEach(k => set(k, S[k]));
+  set('remExamLead', S.examLead); set('remPlanLead', String(S.planLead)); set('remGoalT', S.goalTime); set('studyRemT', S.studyRemT); set('setFocus', S.focusMin); set('setBreak', S.breakMin);
+  ['remTask','remExam','remPlan','remGoal','remBk','remRev','remExamLead','remPlanLead','remGoalT','studyRemT'].forEach(id => { $(id).disabled = !S.remOn; });
+  $('lastExpTxt').textContent = S.lastExp ? tr('set.lastExp',{when: fmtWhen(S.lastExp)}) : tr('set.neverExp');
+  const perm = !('Notification' in window) ? 'unsupported' : Notification.permission;
+  $('permTxt').textContent = perm==='granted' ? tr('set.permGranted') : perm==='denied' ? tr('set.permDenied') : perm==='unsupported' ? tr('set.permNA') : tr('set.permNone');
+  $('permBtn').hidden = perm !== 'default'; $('testNote').hidden = perm !== 'granted'; if(OS_ERR && perm === 'granted') $('permTxt').textContent = tr('set.osErr',{e: OS_ERR}); }
+['remOn','remTask','remExam','remPlan','remGoal','remBk','remRev'].forEach(k => { $(k).onchange = e => { state.settings[k] = e.target.checked; persistSettings(); }; });
+$('remExamLead').onchange = e => { const v = Number(e.target.value); if(!isInt(v,1,14)){ $('setErr').textContent = tr('set.examLeadErr'); e.target.value = state.settings.examLead; return; }
+  $('setErr').textContent = ''; state.settings.examLead = v; persistSettings(); };
+$('remPlanLead').onchange = e => { state.settings.planLead = Number(e.target.value); persistSettings(); };
+$('studyRemT').onchange = e => { const v = e.target.value;
+  if(v && !/^([01]\d|2[0-3]):[0-5]\d$/.test(v)){ e.target.value = state.settings.studyRemT; return; }
+  state.settings.studyRemT = v; persistSettings(); };
+$('remGoalT').onchange = e => { if(!/^([01]\d|2[0-3]):[0-5]\d$/.test(e.target.value)){ $('setErr').textContent = tr('set.goalErr'); e.target.value = state.settings.goalTime; return; }
+  $('setErr').textContent = ''; state.settings.goalTime = e.target.value; persistSettings(); };
+function durChange(input, key, lo, hi){ const v = Number(input.value);
+  if(!isInt(v,lo,hi)){ $('setErr').textContent = tr('set.durErr',{lo, hi}); input.value = state.settings[key]; return; }
+  if(T.runId){ $('setErr').textContent = tr('set.timerBusy'); input.value = state.settings[key]; return; }
+  $('setErr').textContent = ''; state.settings[key] = v; persistSettings(); syncTimerPrefs(); if(checkCustom()) tSet(T.phase); }
+$('setFocus').onchange = e => durChange(e.target, 'focusMin', 1, 180);
+$('setBreak').onchange = e => durChange(e.target, 'breakMin', 1, 60);
+$('testNote').onclick = () => { OS_ERR = ''; const ok = osNotify('Study Time Tracker', tr('set.testBody'), 'test', 'settings'); toast(ok ? tr('set.testOk') : tr('set.testFail')); setTimeout(syncRemUI, 800); };
+$('permBtn').onclick = async () => { if(!('Notification' in window)) return; try{ await Notification.requestPermission(); }catch(e){} syncRemUI(); };
+$('resetPrefsBtn').onclick = async () => { if(locked()) return;
+  if(!(await ask(tr('prefs.resetConfirm'), tr('prefs.reset')))) return;
+  const {lastExp, ...rest} = DEF_PREFS; Object.assign(state.settings, rest); $('setErr').textContent = '';
+  if(!T.runId){ syncTimerPrefs(); if(checkCustom()) tSet(T.phase); }
+  persistSettings(); toast(tr('prefs.done')); };
+setInterval(() => { if(!LOCKED && state) checkReminders(); }, 60000);
+document.addEventListener('visibilitychange', () => { if(!document.hidden && !LOCKED && state) checkReminders(); });
+
+/* Import: Merge adds only records that are missing; Replace takes the backup's history and settings. Either way the recovery copy is saved first. */
+function mergePlan(np){ let added = 0, skipped = 0;
+  ['subjects','tasks','notes','exams','plans','lib','revs','habits','journal','qbank','slotNotes','dayPlans','notif'].forEach(k => (np[k]||[]).forEach(r => {
+    const dupe = PL[k].some(x => x.id===r.id) || (k==='lib' && r.url && PL.lib.some(x => x.url===r.url)) || (k==='subjects' && PL.subjects.length >= 100);
+    if(dupe){ skipped++; return; }
+    PL[k].push(r); added++; if(k==='subjects') legacyName(r.name); }));
+  (np.nseen||[]).forEach(x => { if(!PL.nseen.includes(x)) PL.nseen.push(x); }); PL.nseen = PL.nseen.slice(-800);
+  return {added, skipped}; }
+/* Can these objects be saved in this browser? Writes temporary copies and removes them again, so nothing real changes. */
+function storageFits(parts){
+  const keys = parts.map((_, i) => KEY + '.sizecheck' + i);
+  try{ parts.forEach((p, i) => localStorage.setItem(keys[i], JSON.stringify(p))); return true; }
+  catch(e){ return false; }
+  finally{ keys.forEach(k => { try{ localStorage.removeItem(k); }catch(e){} }); }
+}
+function applyImport(nd, np, mode, raw){
+  const full = mode==='replace' || LOCKED;
+  const cand = full ? {v:4, sessions:nd.sessions, settings:nd.settings, subjects:nd.subjects, ach:nd.ach}
+                    : {v:4, sessions:state.sessions.concat(nd.sessions), settings:state.settings, subjects:state.subjects.concat(nd.subjects), ach:state.ach};
+  if(!storageFits([cand, snap()])) return tr('imp.tooBig', {kb: Math.ceil(JSON.stringify(cand).length*2/1024)});
+  if(LOCKED){ if(!keepRawLocked()) return tr('v.storage'); }
+  else if(!saveRecovery('import')) return tr('v.storage');
+  let a = 0, c = 0, pl = {added:0, skipped:0};
+  if(mode==='replace' || LOCKED){ state = nd; state.ach = null; if(np) PL = np; savePlan(); extrasApply(raw); }
+  else {
+    const have = new Set(state.sessions.map(x => x.id));
+    nd.sessions.forEach(x => { if(have.has(x.id) || dayTotal(x.date) + x.min > 1440){ c++; return; } state.sessions.push(x); have.add(x.id); a++; });
+    nd.subjects.forEach(s => { if(!state.subjects.includes(s) && state.subjects.length < 100) state.subjects.push(s); });
+    if(np) pl = mergePlan(np); savePlan(); }
+  rebuild(); persist(); checkAch(false); hideUndo();
+  if(mode==='replace' || LOCKED) tSet('focus');
+  applyStatic(); resetForm(); render();
+  toast(mode==='replace' || LOCKED ? tr('imp.done',{n:state.sessions.length}) : tr('imp.doneMerge',{a, b:pl.added, c:c + pl.skipped}));
+  /* Profile, photo and font are read once at startup, so a full replace reloads to show the restored account exactly */
+  if(mode==='replace' || LOCKED) setTimeout(() => location.reload(), 1200);
+  return null; }
+/* ---- Revision screen ---- */
+let RVF = 'today';
+function revAdd(title, sid){ const t = today();
+  PL.revs.push({id: rid('r'), title: str(title,120), sid: sid||'', created: new Date().toISOString(), last: t, next: shiftDay(t, PL.revSched[0]), count: 0, diff: 'med', conf: 3, done: false});
+  savePlan(); }
+function revDone(id){ const r = PL.revs.find(x => x.id===id); if(!r || r.done) return; const t = today();
+  r.count++; r.last = t;
+  if(r.count >= PL.revSched.length){ r.done = true; r.next = ''; } else r.next = shiftDay(t, PL.revSched[r.count]);
+  savePlan(); planRender(); }
+function renderRevision(){ const v = $('v-revision'); if(!v || !PL || !PL.revs) return; const t = today(), wk = shiftDay(t,7);
+  const act = PL.revs.filter(r => !r.done);
+  const sets = {today: act.filter(r => r.next===t), overdue: act.filter(r => r.next && r.next < t), upcoming: act.filter(r => r.next > t && r.next <= wk), done: PL.revs.filter(r => r.done)};
+  const list = sets[RVF] || sets.today;
+  const tabs = [['today','rev.today'],['overdue','rev.overdue'],['upcoming','rev.upcoming'],['done','rev.done']];
+  const subj = id => { const s = PL.subjects.find(x => x.id===id); return s ? s.name : ''; };
+  const card = r => `<article class="card revc" data-rid="${esc(r.id)}"><div class="exh"><div><small class="small">${esc(subj(r.sid))}${subj(r.sid)?' · ':''}${esc(tr('rev.count',{c:r.count, t:PL.revSched.length}))}</small><b>${esc(r.title)}</b></div></div>`
+    + `<p class="small">${r.done ? esc(tr('rev.completed')) : esc(tr('rev.nextOn',{d: fmtDate(r.next)}))}</p>`
+    + `<div class="row">${r.done ? '' : `<button type="button" class="primary" data-a="done">${esc(tr('rev.doneBtn'))}</button>`}`
+    + `<label class="small">${esc(tr('rev.diffLbl'))} <select data-a="diff">${REV_DIFF.map(d => `<option value="${d}"${r.diff===d?' selected':''}>${esc(tr('rev.diff.'+d))}</option>`).join('')}</select></label>`
+    + `<label class="small">${esc(tr('rev.conf'))} <select data-a="conf">${[1,2,3,4,5].map(c => `<option value="${c}"${r.conf===c?' selected':''}>${c}</option>`).join('')}</select></label>`
+    + `<button type="button" data-a="del">${esc(tr('exam.del'))}</button></div></article>`;
+  v.innerHTML = `<div class="ph"><div><h2>${esc(tr('rev.title'))}</h2><p class="small">${esc(tr('rev.desc'))}</p></div></div>`
+    + `<form class="card" id="revAddForm"><label class="small" for="revTitle">${esc(tr('rev.addLbl'))}</label><div class="row"><input id="revTitle" maxlength="120" autocomplete="off"><select id="revSubj"><option value="">${esc(tr('rev.subj'))}</option>${PL.subjects.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('')}</select><button type="submit" class="primary">${esc(tr('rev.add'))}</button></div><p class="small" id="revErr" role="alert"></p></form>`
+    + `<details class="card"><summary>${esc(tr('rev.schedLbl'))}: ${esc(PL.revSched.join(', '))}</summary><div class="row"><input id="revSchedIn" value="${esc(PL.revSched.join(', '))}" autocomplete="off"><button type="button" data-a="sched">${esc(tr('rev.schedSave'))}</button></div><p class="small">${esc(tr('rev.schedErr'))}</p></details>`
+    + `<div class="seg" role="group">${tabs.map(([k,l]) => `<button type="button" data-rvf="${k}" class="${RVF===k?'on':''}" aria-pressed="${RVF===k}">${esc(tr(l))} (${sets[k].length})</button>`).join('')}</div>`
+    + (list.length ? list.sort((a,b) => (a.next||'').localeCompare(b.next||'')).map(card).join('') : `<div class="card empty"><b>${esc(tr('rev.none'))}</b><p class="small">${esc(tr('rev.noneD'))}</p></div>`);
+}
+$('v-revision').addEventListener('click', async e => { const b = e.target.closest('button'); if(!b) return;
+  if(b.dataset.rvf){ RVF = b.dataset.rvf; return renderRevision(); }
+  if(b.dataset.a==='sched'){ const raw = $('revSchedIn').value.trim(), okFmt = /^\d+(\s*,\s*\d+)*$/.test(raw); const vals = okFmt ? raw.split(/\s*,\s*/).map(Number) : [];
+    if(!(vals.length >= 1 && vals.length <= 10 && vals.every(x => x >= 1 && x <= 365))){ $('revErr').textContent = tr('rev.schedErr'); return; }
+    PL.revSched = vals; savePlan(); return planRender(); }
+  const card = b.closest('[data-rid]'), r = card && PL.revs.find(x => x.id===card.dataset.rid); if(!r) return;
+  if(b.dataset.a==='done') return revDone(r.id);
+  if(b.dataset.a==='del'){ if(!(await ask(tr('rev.delConfirm'), tr('exam.del')))) return; PL.revs = PL.revs.filter(x => x!==r); savePlan(); return planRender(); } });
+$('v-revision').addEventListener('change', e => { const card = e.target.closest('[data-rid]'), r = card && PL.revs.find(x => x.id===card.dataset.rid); if(!r) return;
+  if(e.target.dataset.a==='diff' && REV_DIFF.includes(e.target.value)) r.diff = e.target.value;
+  else if(e.target.dataset.a==='conf' && isInt(Number(e.target.value),1,5)) r.conf = Number(e.target.value);
+  else return;
+  savePlan(); });
+$('v-revision').addEventListener('submit', e => { if(!e.target.matches('#revAddForm')) return; e.preventDefault();
+  const t = $('revTitle').value.trim(); if(!t){ $('revErr').textContent = tr('rev.titleErr'); return; }
+  revAdd(t, $('revSubj').value); toast(tr('rev.added')); planRender(); });
+/* ---- Habit screen ---- */
+let HVM = '', HSEL = '';
+function habAdd(name){ PL.habits.push({id: rid('h'), name: str(name,80), created: new Date().toISOString(), t: '', log: []}); savePlan(); }
+function habToggle(h, d){ const t = today(); if(!okDate(d) || d > t || d < shiftDay(t,-365)) return;
+  const i = h.log.indexOf(d); if(i === -1) h.log.push(d); else h.log.splice(i, 1); h.log.sort(); savePlan(); }
+function habStreak(h){ const set = new Set(h.log); let d = today(); if(!set.has(d)) d = shiftDay(d,-1); let n = 0; while(set.has(d)){ n++; d = shiftDay(d,-1); } return n; }
+function habLongest(h){ let best = 0, run = 0, prev = ''; for(const d of h.log){ run = (prev && shiftDay(prev,1) === d) ? run + 1 : 1; if(run > best) best = run; prev = d; } return best; }
+function habCount(h, from, to){ return h.log.filter(d => d >= from && d <= to).length; }
+function habPct(n, den){ return den ? Math.round(n / den * 100) : 0; }
+function renderHabits(){ const v = $('v-habits'); if(!v || !PL || !PL.habits) return;
+  const t = today(), wk = shiftDay(t,-6), ym = t.slice(0,7), mStart = ym + '-01', sel = PL.habits.find(x => x.id === HSEL) || null;
+  if(!HVM) HVM = ym;
+  const card = h => { const done = h.log.indexOf(t) !== -1, st = habStreak(h), wp = habPct(habCount(h, wk, t), 7), mp = habPct(habCount(h, mStart, t), Number(t.slice(8,10)));
+    return `<article class="card habc${sel && sel.id===h.id ? ' sel' : ''}" data-hid="${esc(h.id)}"><div class="exh"><div><b>${esc(h.name)}</b><small class="small">${esc(tr('hab.streak',{n:st}))} · ${esc(tr('hab.week',{p:wp}))} · ${esc(tr('hab.month',{p:mp}))}</small></div></div>`
+      + `<div class="row"><button type="button" class="${done ? '' : 'primary'}" data-a="today">${esc(done ? tr('hab.undo') : tr('hab.mark'))}</button><button type="button" data-a="sel">${esc(tr('hab.cal'))}</button>`
+      + `<label class="small">${esc(tr('hab.remTime'))} <input type="time" data-a="time" value="${esc(h.t)}"></label><button type="button" data-a="del">${esc(tr('exam.del'))}</button></div></article>`; };
+  let detail = '';
+  if(sel){
+    const [from, to] = [HVM + '-01', HVM + '-' + String(new Date(Number(HVM.slice(0,4)), Number(HVM.slice(5,7)), 0).getDate()).padStart(2,'0')];
+    const first = new Date(Number(HVM.slice(0,4)), Number(HVM.slice(5,7)) - 1, 1).getDay(), days = Number(to.slice(8,10));
+    const cells = []; for(let i = 0; i < first; i++) cells.push('<span class="hcell blank"></span>');
+    for(let dd = 1; dd <= days; dd++){ const d = HVM + '-' + String(dd).padStart(2,'0'), on = sel.log.indexOf(d) !== -1, fut = d > t;
+      cells.push(`<button type="button" class="hcell${on ? ' on' : ''}" data-hd="${d}"${fut ? ' disabled' : ''} aria-pressed="${on}">${dd}</button>`); }
+    const hist = sel.log.slice(-30).reverse().map(d => `<li>${esc(fmtDate(d))}</li>`).join('');
+    detail = `<h3>${esc(sel.name)}</h3><section class="card"><div class="row"><button type="button" data-hm="-1" aria-label="${esc(tr('hab.prevM'))}">‹</button><b>${esc(HVM)}</b><button type="button" data-hm="1" aria-label="${esc(tr('hab.nextM'))}"${HVM >= ym ? ' disabled' : ''}>›</button></div><div class="hgrid">${cells.join('')}</div></section>`
+      + `<h4>${esc(tr('hab.history'))}</h4>` + (hist ? `<ul>${hist}</ul>` : `<p class="small">${esc(tr('hab.histNone'))}</p>`)
+      + `<p class="small">${esc(tr('hab.longest',{n: habLongest(sel)}))}</p>`;
+  }
+  v.innerHTML = `<div class="ph"><div><h2>${esc(tr('hab.title'))}</h2><p class="small">${esc(tr('hab.desc'))}</p></div></div>`
+    + `<form class="card" id="habAddForm"><label class="small" for="habName">${esc(tr('hab.addLbl'))}</label><div class="row"><input id="habName" maxlength="80" autocomplete="off"><button type="submit" class="primary">${esc(tr('hab.add'))}</button></div><p class="small" id="habErr" role="alert"></p></form>`
+    + (PL.habits.length ? PL.habits.map(card).join('') : `<div class="card empty"><b>${esc(tr('hab.none'))}</b><p class="small">${esc(tr('hab.noneD'))}</p></div>`)
+    + detail;
+}
+$('v-habits').addEventListener('click', async e => { const b = e.target.closest('button'); if(!b) return;
+  if(b.dataset.hm){ const [y, m] = HVM.split('-').map(Number), nd = new Date(y, m - 1 + Number(b.dataset.hm), 1);
+    HVM = nd.getFullYear() + '-' + String(nd.getMonth() + 1).padStart(2,'0'); return renderHabits(); }
+  if(b.dataset.hd){ const h = PL.habits.find(x => x.id === HSEL); if(!h) return; habToggle(h, b.dataset.hd); return planRender(); }
+  const card = b.closest('[data-hid]'), h = card && PL.habits.find(x => x.id === card.dataset.hid); if(!h) return;
+  if(b.dataset.a === 'today'){ habToggle(h, today()); return planRender(); }
+  if(b.dataset.a === 'sel'){ HSEL = h.id; HVM = today().slice(0,7); return planRender(); }
+  if(b.dataset.a === 'del'){ if(!(await ask(tr('hab.delConfirm'), tr('exam.del')))) return;
+    PL.habits = PL.habits.filter(x => x !== h); if(HSEL === h.id) HSEL = ''; savePlan(); return planRender(); } });
+$('v-habits').addEventListener('change', e => { if(e.target.dataset.a !== 'time') return;
+  const card = e.target.closest('[data-hid]'), h = card && PL.habits.find(x => x.id === card.dataset.hid); if(!h) return;
+  const v = e.target.value; if(v && !/^([01]\d|2[0-3]):[0-5]\d$/.test(v)){ e.target.value = h.t; return; }
+  h.t = v; savePlan(); });
+$('v-habits').addEventListener('submit', e => { if(!e.target.matches('#habAddForm')) return; e.preventDefault();
+  const n = $('habName').value.trim(); if(!n){ $('habErr').textContent = tr('hab.nameErr'); return; }
+  habAdd(n); toast(tr('hab.added')); planRender(); });
+/* ---- Journal screen ---- */
+let JDATE = '', JTAB = 'daily';
+const jEntry = d => PL.journal.find(x => x.date === d) || null;
+const jStars = p => p ? '★'.repeat(p) + '☆'.repeat(5 - p) : '';
+function jWeekStart(d){ const dow = new Date(d + 'T00:00:00').getDay(); return shiftDay(d, -((dow + 6) % 7)); }
+function jGroups(keyFn){ const g = {}; PL.journal.forEach(e => { const k = keyFn(e.date); (g[k] = g[k] || []).push(e); }); return g; }
+function jStats(list){ const rated = list.filter(e => e.prod > 0); return {c: list.length, m: list.reduce((a, e) => a + e.mins, 0), p: rated.length ? (rated.reduce((a, e) => a + e.prod, 0) / rated.length).toFixed(1) : '—'}; }
+function jCard(e){ return `<article class="card jrc" data-jd="${esc(e.date)}"><div class="exh"><div><small class="small">${esc(fmtDate(e.date))}${e.mins ? ' · ' + e.mins + ' ' + esc(tr('jr.minShort')) : ''}${e.prod ? ' · ' + jStars(e.prod) : ''}</small><b>${esc((e.read || '').slice(0,120) || '—')}</b></div></div>`
+  + `<div class="row"><button type="button" data-a="edit">${esc(tr('jr.edit'))}</button></div></article>`; }
+function renderJournal(full){ const v = $('v-journal'); if(!v || !PL || !PL.journal) return;
+  if(full || !v.querySelector('#jForm')){
+    if(!JDATE) JDATE = today();
+    const e = jEntry(JDATE), tracked = dayTotal(JDATE), t = today();
+    const field = (id, label, val) => `<label class="small" for="${id}">${esc(tr(label))}</label><textarea id="${id}" rows="2" maxlength="600">${esc(val)}</textarea>`;
+    v.innerHTML = `<div class="ph"><div><h2>${esc(tr('jr.title'))}</h2><p class="small">${esc(tr('jr.desc'))}</p></div></div>`
+      + `<form class="card" id="jForm" novalidate><label class="small" for="jDate">${esc(tr('jr.date'))}</label><input id="jDate" type="date" max="${t}" value="${JDATE}">`
+      + field('jRead', 'jr.read', e ? e.read : '')
+      + `<label class="small" for="jMins">${esc(tr('jr.mins'))}</label><div class="row"><input id="jMins" type="number" min="0" max="1440" step="1" value="${e ? e.mins : tracked}"><small class="small">${esc(tr('jr.tracked',{n: tracked}))}</small></div>`
+      + field('jLearned', 'jr.learned', e ? e.learned : '') + field('jHard', 'jr.hard', e ? e.hard : '') + field('jMistakes', 'jr.mistakes', e ? e.mistakes : '') + field('jTomorrow', 'jr.tomorrow', e ? e.tomorrow : '')
+      + `<label class="small" for="jProd">${esc(tr('jr.prod'))}</label><select id="jProd"><option value="">${esc(tr('jr.prodNone'))}</option>${[1,2,3,4,5].map(n => `<option value="${n}"${e && e.prod === n ? ' selected' : ''}>${esc(tr('jr.prodLbl',{n}))} ${jStars(n)}</option>`).join('')}</select>`
+      + `<p class="small" id="jErr" role="alert"></p><div class="row"><button type="submit" class="primary">${esc(tr('jr.save'))}</button>${e ? `<button type="button" id="jDel">${esc(tr('jr.delete'))}</button>` : ''}</div></form>`
+      + `<section id="jHist"></section>`;
+  }
+  const hist = $('jHist'); if(!hist) return;
+  const tabs = [['daily','jr.tabDaily'],['weekly','jr.tabWeekly'],['monthly','jr.tabMonthly']];
+  let body = '';
+  if(!PL.journal.length) body = `<div class="card empty"><b>${esc(tr('jr.none'))}</b><p class="small">${esc(tr('jr.noneD'))}</p></div>`;
+  else if(JTAB === 'daily') body = PL.journal.slice().reverse().slice(0,60).map(jCard).join('');
+  else {
+    const g = jGroups(JTAB === 'weekly' ? jWeekStart : (d => d.slice(0,7)));
+    body = Object.keys(g).sort().reverse().map(k => { const st = jStats(g[k]), title = JTAB === 'weekly' ? tr('jr.weekRange',{d: fmtDate(k)}) : k;
+      return `<article class="card jrc"><div class="exh"><div><b>${esc(title)}</b><small class="small">${esc(tr('jr.sumLine',{c: st.c, m: st.m, p: st.p}))}</small></div></div>`
+        + `<details><summary class="small">${esc(tr('jr.history'))}</summary>${g[k].slice().reverse().map(jCard).join('')}</details></article>`; }).join('');
+  }
+  hist.innerHTML = `<h3>${esc(tr('jr.history'))}</h3><div class="seg" role="group">${tabs.map(([k,l]) => `<button type="button" data-jtab="${k}" class="${JTAB===k?'on':''}" aria-pressed="${JTAB===k}">${esc(tr(l))}</button>`).join('')}</div>${body}`;
+}
+$('v-journal').addEventListener('click', async e => { const b = e.target.closest('button'); if(!b) return;
+  if(b.dataset.jtab){ JTAB = b.dataset.jtab; return renderJournal(false); }
+  if(b.dataset.a === 'edit'){ const card = b.closest('[data-jd]'); JDATE = card.dataset.jd; return renderJournal(true); }
+  if(b.id === 'jDel'){ if(!(await ask(tr('jr.delConfirm'), tr('jr.delete')))) return;
+    PL.journal = PL.journal.filter(x => x.date !== JDATE); savePlan(); return renderJournal(true); } });
+$('v-journal').addEventListener('change', e => { if(e.target.id !== 'jDate') return;
+  if(okDate(e.target.value) && e.target.value <= today()){ JDATE = e.target.value; renderJournal(true); }
+  else { e.target.value = JDATE; $('jErr').textContent = tr('jr.dateErr'); } });
+$('v-journal').addEventListener('submit', e => { if(!e.target.matches('#jForm')) return; e.preventDefault();
+  const err = m => { $('jErr').textContent = m; };
+  const date = $('jDate').value, mraw = $('jMins').value, mins = mraw === '' ? 0 : Number(mraw), prod = $('jProd').value ? Number($('jProd').value) : 0;
+  const vals = {date, read: $('jRead').value.trim(), learned: $('jLearned').value.trim(), hard: $('jHard').value.trim(), mistakes: $('jMistakes').value.trim(), tomorrow: $('jTomorrow').value.trim(), mins, prod};
+  if(!okDate(date) || date > today()) return err(tr('jr.dateErr'));
+  if(!Number.isInteger(mins) || mins < 0 || mins > 1440) return err(tr('jr.minsErr'));
+  if(!vals.read && !vals.learned && !vals.hard && !vals.mistakes && !vals.tomorrow && mins === 0 && prod === 0) return err(tr('jr.empty'));
+  const cur = jEntry(date); const obj = Object.assign({id: cur ? cur.id : rid('j')}, vals);
+  if(cur) Object.assign(cur, obj); else PL.journal.push(obj);
+  PL.journal.sort((p,q) => p.date < q.date ? -1 : 1); savePlan(); JDATE = date; toast(tr('jr.saved')); renderJournal(true); });
+/* ---- Question bank screen ---- */
+let QTAB = 'list', QFILT = {sub:'', type:'', diff:'', fav:false}, QEDIT = '', QZ = null;
+const qItem = id => PL.qbank.find(x => x.id === id) || null;
+const qSubName = id => { const s = PL.subjects.find(x => x.id === id); return s ? s.name : ''; };
+function qFiltered(){ return PL.qbank.filter(x => (!QFILT.sub || x.sid === QFILT.sub) && (!QFILT.type || x.type === QFILT.type) && (!QFILT.diff || x.diff === QFILT.diff) && (!QFILT.fav || x.fav)); }
+function qBump(id, right){ const x = qItem(id); if(!x) return; x.tries++; if(!right) x.wrong++; savePlan(); }
+function qFmt(ms){ const s = Math.max(0, Math.ceil(ms / 1000)); return String(Math.floor(s / 60)).padStart(2,'0') + ':' + String(s % 60).padStart(2,'0'); }
+function qForm(e){
+  const sel = (list, val, lab) => list.map(([v, l]) => `<option value="${v}"${val === v ? ' selected' : ''}>${esc(l)}</option>`).join('');
+  const subs = PL.subjects.map(s => [s.id, s.name]);
+  const type = e ? e.type : 'mcq', o = e && e.type === 'mcq' ? e.opts : ['','','',''];
+  return `<form class="card" id="qbForm" novalidate><h3>${esc(tr(QEDIT ? 'qb.edit' : 'qb.add'))}</h3>`
+    + `<label class="small" for="qQ">${esc(tr('qb.q'))}</label><textarea id="qQ" rows="2" maxlength="500">${esc(e ? e.q : '')}</textarea>`
+    + `<div class="row"><label class="small">${esc(tr('qb.subj'))} <select id="qSub"><option value="">—</option>${sel(subs, e ? e.sid : '')}</select></label>`
+    + `<label class="small">${esc(tr('qb.type'))} <select id="qType">${sel(Q_TYPES.map(t => [t, tr('qb.type.'+t)]), type)}</select></label>`
+    + `<label class="small">${esc(tr('qb.diff'))} <select id="qDiff">${sel(Q_DIFFS.map(d => [d, tr('qb.diff.'+d)]), e ? e.diff : 'med')}</select></label></div>`
+    + `<label class="small" for="qTopic">${esc(tr('qb.topic'))}</label><input id="qTopic" maxlength="80" value="${esc(e ? e.topic : '')}">`
+    + `<div id="qMcqBox"${type === 'mcq' ? '' : ' hidden'}>${[1,2,3,4].map(i => `<label class="small" for="qO${i}">${esc(tr('qb.opt',{n:i}))}</label><input id="qO${i}" maxlength="200" value="${esc(o[i-1] || '')}">`).join('')}`
+    + `<label class="small">${esc(tr('qb.correct'))} <select id="qAns">${[1,2,3,4].map(n => `<option value="${n}"${(e && e.type === 'mcq' ? e.ansIdx : 1) === n ? ' selected' : ''}>${n}</option>`).join('')}</select></label></div>`
+    + `<div id="qTxtBox"${type === 'mcq' ? ' hidden' : ''}><label class="small" for="qTxtAns">${esc(tr('qb.ans'))}</label><textarea id="qTxtAns" rows="2" maxlength="500">${esc(e && e.type !== 'mcq' ? e.ans : '')}</textarea></div>`
+    + `<label class="small" for="qExpl">${esc(tr('qb.expl'))}</label><textarea id="qExpl" rows="2" maxlength="500">${esc(e ? e.expl : '')}</textarea>`
+    + `<label class="small" for="qTags">${esc(tr('qb.tags'))}</label><input id="qTags" maxlength="200" value="${esc(e ? e.tags : '')}">`
+    + `<p class="small" id="qErr" role="alert"></p><div class="row"><button type="submit" class="primary">${esc(tr('qb.save'))}</button>${QEDIT ? `<button type="button" id="qCancel">${esc(tr('qb.cancel'))}</button>` : ''}</div></form>`;
+}
+function qCard(x){ return `<article class="card qbc" data-qid="${esc(x.id)}"><div class="exh"><div><small class="small">${esc(qSubName(x.sid))}${qSubName(x.sid) ? ' · ' : ''}${esc(tr('qb.type.'+x.type))} · ${esc(tr('qb.diff.'+x.diff))}${x.tries ? ' · ' + x.tries + ' / ' + x.wrong + ' ' + esc(tr('qb.wrongWord')) : ''}</small><b>${esc(x.q)}</b></div></div>`
+  + `<details><summary class="small">${esc(tr('qb.showAns'))}</summary>${x.type === 'mcq' ? `<ol>${x.opts.map((o,i) => `<li${i + 1 === x.ansIdx ? ' class="ok"' : ''}>${esc(o)}</li>`).join('')}</ol>` : `<p>${esc(x.ans || '—')}</p>`}${x.expl ? `<p class="small">${esc(x.expl)}</p>` : ''}</details>`
+  + `<div class="row"><button type="button" data-a="fav" aria-pressed="${x.fav}">${x.fav ? '★' : '☆'} ${esc(tr('qb.fav'))}</button><button type="button" data-a="edit">${esc(tr('jr.edit'))}</button><button type="button" data-a="del">${esc(tr('exam.del'))}</button></div></article>`; }
+function qRunView(){
+  const id = QZ.ids[QZ.i], x = qItem(id), n = QZ.ids.length;
+  const head = `<div class="row"><b>${QZ.i + 1} / ${n}</b>${QZ.end ? `<span id="qzTime">${qFmt(QZ.end - Date.now())}</span>` : ''}</div>`;
+  if(!x) return '';
+  const qtext = `<p id="qzQ"><b>${esc(x.q)}</b></p>`;
+  if(QZ.phase === 'answer'){
+    const input = x.type === 'mcq'
+      ? x.opts.map((o,i) => `<label class="wchk"><input type="radio" name="qzSel" value="${i+1}"> ${esc(o)}</label>`).join('') + `<div class="row"><button type="button" class="primary" data-a="check">${esc(tr('qb.check'))}</button><button type="button" data-a="skip">${esc(tr('qb.skip'))}</button></div>`
+      : `<textarea id="qzTxt" rows="3" maxlength="500"></textarea><div class="row"><button type="button" class="primary" data-a="show">${esc(tr('qb.show'))}</button><button type="button" data-a="skip">${esc(tr('qb.skip'))}</button></div>`;
+    return head + qtext + input;
+  }
+  const res = QZ.res[id];
+  const verdict = x.type === 'mcq' ? (res === 'right' ? tr('qb.rightMsg') : tr('qb.wrongMsg') + ' ' + tr('qb.correctIs',{n:x.ansIdx,a:x.opts[x.ansIdx-1]})) : '';
+  const answer = x.type === 'mcq' ? '' : `<p><b>${esc(tr('qb.correctAns'))}:</b> ${esc(x.ans || '—')}</p>`;
+  const expl = x.expl ? `<p class="small">${esc(x.expl)}</p>` : '';
+  const self = x.type === 'mcq' ? '' : (res ? '' : `<div class="row"><button type="button" data-a="right">${esc(tr('qb.gotRight'))}</button><button type="button" data-a="wrong">${esc(tr('qb.gotWrong'))}</button></div>`);
+  const last = QZ.i + 1 >= n;
+  return head + qtext + `<p>${esc(verdict)}</p>` + answer + expl + self
+    + `<div class="row"><button type="button" class="primary" data-a="next"${!res && x.type !== 'mcq' ? ' disabled' : ''}>${esc(tr(last ? 'qb.finish' : 'qb.next'))}</button></div>`;
+}
+function qSummary(){
+  const vals = Object.values(QZ.res), r = vals.filter(v => v === 'right').length, w = vals.filter(v => v === 'wrong').length, s = QZ.ids.length - r - w;
+  const wrongIds = QZ.ids.filter(id => QZ.res[id] === 'wrong');
+  return `<div class="card"><h3>${esc(tr('qb.done'))}</h3><p>${esc(tr('qb.score',{r, w, s}))}</p>`
+    + (wrongIds.length ? `<ul>${wrongIds.map(id => `<li>${esc(qItem(id).q)}</li>`).join('')}</ul><div class="row"><button type="button" class="primary" data-a="again-wrong">${esc(tr('qb.practiceWrong'))}</button>` : '<div class="row">')
+    + `<button type="button" data-a="new">${esc(tr('qb.again'))}</button></div></div>`;
+}
+function qStartQuiz(list, count, mins){
+  const pool = list.slice(); for(let i = pool.length - 1; i > 0; i--){ const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
+  const ids = (count > 0 ? pool.slice(0, count) : pool).map(x => x.id);
+  if(QZ && QZ.timer) clearInterval(QZ.timer);
+  QZ = {ids, i: 0, phase: 'answer', res: {}, end: mins > 0 ? Date.now() + mins * 60000 : 0, finished: false, timer: 0};
+  QZ.timer = setInterval(() => { if(!QZ || QZ.finished || !QZ.end) return;
+    if(Date.now() >= QZ.end){ QZ.finished = true; clearInterval(QZ.timer); if(QTAB === 'quiz') renderQBank(); return; }
+    const t = $('qzTime'); if(t) t.textContent = qFmt(QZ.end - Date.now()); }, 1000);
+  QTAB = 'quiz'; renderQBank();
+}
+$('v-qbank').addEventListener('click', async e => { const b = e.target.closest('button'); if(!b) return;
+  if(b.dataset.qtab){ QTAB = b.dataset.qtab; return renderQBank(); }
+  if(b.id === 'qCancel'){ QEDIT = ''; return renderQBank(); }
+  if(b.dataset.a === 'start'){ const mins = Math.max(0, Math.min(180, Number($('qzMins').value) || 0)), count = Number($('qzCount').value);
+    const list = qFiltered(); return qStartQuiz(list, count, mins); }
+  if(b.dataset.a === 'quiz-wrong'){ return qStartQuiz(PL.qbank.filter(x => x.wrong > 0), 0, 0); }
+  if(b.dataset.a === 'again-wrong'){ const ids = QZ.ids.filter(id => QZ.res[id] === 'wrong'); const list = ids.map(qItem).filter(Boolean); return qStartQuiz(list, 0, 0); }
+  if(b.dataset.a === 'new'){ QZ = null; return renderQBank(); }
+  if(QZ && QZ.phase !== undefined && !QZ.finished){
+    const id = QZ.ids[QZ.i], x = qItem(id); if(!x) return;
+    if(b.dataset.a === 'check'){ const sel = document.querySelector('input[name=qzSel]:checked'); if(!sel) return;
+      const right = Number(sel.value) === x.ansIdx; QZ.res[id] = right ? 'right' : 'wrong'; qBump(id, right); QZ.phase = 'review'; return renderQBank(); }
+    if(b.dataset.a === 'show'){ QZ.phase = 'review'; return renderQBank(); }
+    if(b.dataset.a === 'skip'){ QZ.res[id] = 'skip'; QZ.phase = 'review'; return qNext(); }
+    if(b.dataset.a === 'right' || b.dataset.a === 'wrong'){ const right = b.dataset.a === 'right'; QZ.res[id] = right ? 'right' : 'wrong'; qBump(id, right); return renderQBank(); }
+    if(b.dataset.a === 'next') return qNext(); }
+  const card = b.closest('[data-qid]'), x = card && qItem(card.dataset.qid); if(!x) return;
+  if(b.dataset.a === 'fav'){ x.fav = !x.fav; savePlan(); return renderQBank(); }
+  if(b.dataset.a === 'edit'){ QEDIT = x.id; QTAB = 'list'; return renderQBank(); }
+  if(b.dataset.a === 'del'){ if(!(await ask(tr('qb.delConfirm'), tr('exam.del')))) return;
+    PL.qbank = PL.qbank.filter(y => y !== x); if(QEDIT === x.id) QEDIT = ''; savePlan(); return renderQBank(); } });
+function qNext(){ if(QZ.i + 1 >= QZ.ids.length){ QZ.finished = true; clearInterval(QZ.timer); return renderQBank(); }
+  QZ.i++; QZ.phase = 'answer'; renderQBank(); }
+$('v-qbank').addEventListener('change', e => { const t = e.target;
+  if(t.id === 'qfSub') QFILT.sub = t.value; else if(t.id === 'qfType') QFILT.type = t.value; else if(t.id === 'qfDiff') QFILT.diff = t.value; else if(t.id === 'qfFav') QFILT.fav = t.checked; else return;
+  renderQBank(); });
+$('v-qbank').addEventListener('submit', e => { if(!e.target.matches('#qbForm')) return; e.preventDefault();
+  const err = m => { $('qErr').textContent = m; }, type = $('qType').value;
+  const opts = type === 'mcq' ? [1,2,3,4].map(i => $('qO' + i).value.trim()) : [];
+  if(!$('qQ').value.trim()) return err(tr('qb.qErr'));
+  if(type === 'mcq' && opts.some(o => !o)) return err(tr('qb.optErr'));
+  const cur = QEDIT ? qItem(QEDIT) : null;
+  const obj = cleanQ({id: QEDIT || rid('q'), q: $('qQ').value.trim(), sid: $('qSub').value, topic: $('qTopic').value.trim(), type,
+    diff: $('qDiff').value, opts, ansIdx: type === 'mcq' ? Number($('qAns').value) : 0, ans: $('qTxtAns').value.trim(),
+    expl: $('qExpl').value.trim(), tags: $('qTags').value.trim(), fav: cur ? cur.fav : false,
+    tries: cur ? cur.tries : 0, wrong: cur ? cur.wrong : 0, created: cur ? cur.created : new Date().toISOString()});
+  if(!obj) return err(tr('qb.qErr'));
+  if(cur) Object.assign(cur, obj); else PL.qbank.push(obj);
+  QEDIT = ''; savePlan(); toast(tr('qb.saved')); renderQBank(); });
+function renderQBank(){ const v = $('v-qbank'); if(!v || !PL || !PL.qbank) return;
+  const tabs = [['list','qb.tabList'],['quiz','qb.tabQuiz'],['wrong','qb.tabWrong']];
+  const subs = PL.subjects.map(s => `<option value="${esc(s.id)}"${QFILT.sub === s.id ? ' selected' : ''}>${esc(s.name)}</option>`).join('');
+  const filters = `<div class="row"><select id="qfSub"><option value="">${esc(tr('qb.all'))}</option>${subs}</select>`
+    + `<select id="qfType"><option value="">${esc(tr('qb.all'))}</option>${Q_TYPES.map(t => `<option value="${t}"${QFILT.type === t ? ' selected' : ''}>${esc(tr('qb.type.'+t))}</option>`).join('')}</select>`
+    + `<select id="qfDiff"><option value="">${esc(tr('qb.all'))}</option>${Q_DIFFS.map(d => `<option value="${d}"${QFILT.diff === d ? ' selected' : ''}>${esc(tr('qb.diff.'+d))}</option>`).join('')}</select>`
+    + `<label class="wchk"><input type="checkbox" id="qfFav"${QFILT.fav ? ' checked' : ''}> ${esc(tr('qb.favOnly'))}</label></div>`;
+  let body = '';
+  if(QTAB === 'list'){
+    const items = qFiltered();
+    body = qForm(QEDIT ? qItem(QEDIT) : null) + filters + (items.length ? items.map(qCard).join('') : `<div class="card empty"><b>${esc(tr('qb.none'))}</b><p class="small">${esc(tr('qb.noneD'))}</p></div>`);
+  } else if(QTAB === 'quiz'){
+    if(QZ && !QZ.finished && QZ.i < QZ.ids.length) body = qRunView();
+    else if(QZ && QZ.finished) body = qSummary();
+    else {
+      const n = qFiltered().length;
+      body = filters + (n ? `<div class="card"><div class="row"><label class="small">${esc(tr('qb.count'))} <select id="qzCount"><option value="5">5</option><option value="10">10</option><option value="20">20</option><option value="0">${esc(tr('qb.countAll'))}</option></select></label><label class="small">${esc(tr('qb.timer'))} <input id="qzMins" type="number" min="0" max="180" value="0"></label></div><div class="row"><button type="button" class="primary" data-a="start">${esc(tr('qb.start'))} (${n})</button></div></div>` : `<div class="card empty"><b>${esc(tr('qb.noneQuiz'))}</b></div>`);
+    }
+  } else {
+    const wrong = PL.qbank.filter(x => x.wrong > 0).sort((a,b) => b.wrong - a.wrong);
+    body = wrong.length ? `<div class="row"><button type="button" class="primary" data-a="quiz-wrong">${esc(tr('qb.practiceWrong'))} (${wrong.length})</button></div>` + wrong.map(qCard).join('') : `<div class="card empty"><b>${esc(tr('qb.noneWrong'))}</b></div>`;
+  }
+  v.innerHTML = `<div class="ph"><div><h2>${esc(tr('qb.title'))}</h2><p class="small">${esc(tr('qb.desc'))}</p></div></div>`
+    + `<div class="seg" role="group">${tabs.map(([k,l]) => `<button type="button" data-qtab="${k}" class="${QTAB === k ? 'on' : ''}" aria-pressed="${QTAB === k}">${esc(tr(l))}</button>`).join('')}</div>` + body;
+  const ty = $('qType'); if(ty) ty.addEventListener('change', () => { $('qMcqBox').hidden = ty.value !== 'mcq'; $('qTxtBox').hidden = ty.value === 'mcq'; });
+}
+/* ---- Time of day screen ---- */
+let SLV = 'today', SLM = '', SLDATE = '';
+const SL_KEYS = ['m','a','n'];
+function slotOfMs(ms, cfg){ if(typeof ms !== 'number') return 'u'; const d = new Date(ms), hm = d.getHours() * 60 + d.getMinutes(), M = slMin(cfg.m), A = slMin(cfg.a), N = slMin(cfg.n);
+  return (hm >= M && hm < A) ? 'm' : (hm >= A && hm < N) ? 'a' : 'n'; }
+function slotStats(list, cfg){ const st = {m:{min:0,n:0}, a:{min:0,n:0}, n:{min:0,n:0}, u:{min:0,n:0}};
+  list.forEach(x => { const k = slotOfMs(x.start, cfg); st[k].min += x.min; st[k].n++; }); return st; }
+function slotName(k, cfg){ const r = k === 'm' ? cfg.m + '–' + cfg.a : k === 'a' ? cfg.a + '–' + cfg.n : cfg.n + '–' + cfg.m;
+  return tr('sl.n' + k) + ' (' + r + ')'; }
+function monthEnd(ym){ return ym + '-' + String(new Date(Number(ym.slice(0,4)), Number(ym.slice(5,7)), 0).getDate()).padStart(2,'0'); }
+function slotSummary(ym, cfg){ const from = ym + '-01', to = monthEnd(ym), list = state.sessions.filter(x => x.date >= from && x.date <= to);
+  if(!list.length) return [tr('sl.noMonth')];
+  const st = slotStats(list, cfg), lines = [];
+  const most = SL_KEYS.slice().sort((p,q) => st[q].min - st[p].min)[0], least = SL_KEYS.slice().sort((p,q) => st[p].min - st[q].min)[0];
+  if(st[most].min > 0) lines.push(tr('sl.most', {s: slotName(most, cfg), m: dur(st[most].min)}));
+  lines.push(tr('sl.least', {s: slotName(least, cfg), m: dur(st[least].min)}));
+  const byDay = {}; list.forEach(x => { byDay[x.date] = (byDay[x.date] || 0) + x.min; });
+  const bd = Object.keys(byDay).sort((p,q) => byDay[q] - byDay[p])[0];
+  lines.push(tr('sl.bestDay', {d: fmtDate(bd), m: dur(byDay[bd])}));
+  if(st.u.n) lines.push(tr('sl.unknown', {n: st.u.n, m: dur(st.u.min)}));
+  const nc = k => PL.slotNotes.filter(x => x.slot === k && x.date >= from && x.date <= to).length;
+  lines.push(tr('sl.notesCount', {a: nc('m'), b: nc('a'), c: nc('n')}));
+  return lines; }
+function renderSlots(){ const v = $('v-slots'); if(!v || !PL || !state) return;
+  const cfg = PL.slotCfg, t = today(); if(!SLDATE) SLDATE = t; if(!SLM) SLM = t.slice(0,7);
+  let from, to;
+  if(SLV === 'today'){ from = to = t; } else if(SLV === 'week'){ from = shiftDay(t,-6); to = t; } else { from = SLM + '-01'; to = monthEnd(SLM); }
+  const st = slotStats(state.sessions.filter(x => x.date >= from && x.date <= to), cfg);
+  const max = Math.max(1, ...SL_KEYS.concat('u').map(k => st[k].min));
+  const bars = ['m','a','n','u'].map(k => { const label = k === 'u' ? tr('sl.u') : slotName(k, cfg);
+    return `<div class="sl-row"><div class="sl-lbl"><b>${esc(label)}</b><small class="small">${esc(dur(st[k].min))} · ${st[k].n}</small></div><div class="sl-track"><i style="width:${Math.round(st[k].min / max * 100)}%"></i></div></div>`; }).join('');
+  const tabs = [['today','sl.today'],['week','sl.week'],['month','sl.month']];
+  const notesFor = PL.slotNotes.filter(x => x.date === SLDATE);
+  const noteBox = k => { const n = notesFor.find(x => x.slot === k); return `<label class="small" for="sln_${k}">${esc(slotName(k, cfg))}</label><textarea id="sln_${k}" rows="2" maxlength="400">${esc(n ? n.text : '')}</textarea>`; };
+  const monthBox = SLV === 'month' ? `<section class="card"><div class="row"><button type="button" data-slm="-1" aria-label="${esc(tr('sl.prevM'))}">‹</button><b>${esc(SLM)}</b><button type="button" data-slm="1" aria-label="${esc(tr('sl.nextM'))}"${SLM >= t.slice(0,7) ? ' disabled' : ''}>›</button></div><h3>${esc(tr('sl.summary', {m: SLM}))}</h3><ul>${slotSummary(SLM, cfg).map(l => `<li>${esc(l)}</li>`).join('')}</ul></section>` : '';
+  v.innerHTML = `<p class="small">${esc(tr('sl.desc'))}</p>`
+    + `<div class="seg" role="group">${tabs.map(([k,l]) => `<button type="button" data-slv="${k}" class="${SLV === k ? 'on' : ''}" aria-pressed="${SLV === k}">${esc(tr(l))}</button>`).join('')}</div>`
+    + `<section class="card"><p class="small">${esc(tr('sl.barNote'))}</p>${bars}</section>` + monthBox
+    + `<form class="card" id="slNotesForm"><label class="small" for="slDate">${esc(tr('sl.noteDate'))}</label><input id="slDate" type="date" max="${t}" value="${SLDATE}">`
+    + `${['m','a','n'].map(noteBox).join('')}<div class="row"><button type="submit" class="primary">${esc(tr('sl.notesSave'))}</button></div></form>`
+    + `<form class="card" id="slCfgForm"><h3>${esc(tr('sl.cfgTitle'))}</h3><div class="row">`
+    + `<label class="small">${esc(tr('sl.cfgM'))} <input id="slM" type="time" value="${cfg.m}"></label>`
+    + `<label class="small">${esc(tr('sl.cfgA'))} <input id="slA" type="time" value="${cfg.a}"></label>`
+    + `<label class="small">${esc(tr('sl.cfgN'))} <input id="slN" type="time" value="${cfg.n}"></label></div>`
+    + `<p class="small" id="slCfgErr" role="alert"></p><div class="row"><button type="submit" class="primary">${esc(tr('sl.cfgSave'))}</button></div></form>`;
+}
+$('v-slots').addEventListener('click', e => { const b = e.target.closest('button'); if(!b) return;
+  if(b.dataset.slv){ SLV = b.dataset.slv; return renderSlots(); }
+  if(b.dataset.slm){ const [y, m] = SLM.split('-').map(Number), nd = new Date(y, m - 1 + Number(b.dataset.slm), 1);
+    SLM = nd.getFullYear() + '-' + String(nd.getMonth() + 1).padStart(2,'0'); return renderSlots(); } });
+$('v-slots').addEventListener('change', e => { if(e.target.id === 'slDate' && okDate(e.target.value) && e.target.value <= today()){ SLDATE = e.target.value; renderSlots(); } });
+$('v-slots').addEventListener('submit', e => { e.preventDefault();
+  if(e.target.matches('#slNotesForm')){ SL_KEYS.forEach(k => { const text = $('sln_' + k).value.trim(), cur = PL.slotNotes.find(x => x.date === SLDATE && x.slot === k);
+      if(!text){ if(cur) PL.slotNotes = PL.slotNotes.filter(x => x !== cur); }
+      else if(cur) cur.text = text.slice(0,400); else PL.slotNotes.push({id: rid('sn'), date: SLDATE, slot: k, text: text.slice(0,400)}); });
+    savePlan(); toast(tr('sl.saved')); return renderSlots(); }
+  if(e.target.matches('#slCfgForm')){ const cfg = {m: $('slM').value, a: $('slA').value, n: $('slN').value};
+    if(!cleanSlotCfg(cfg).m || cleanSlotCfg(cfg).m !== cfg.m || cleanSlotCfg(cfg).a !== cfg.a || cleanSlotCfg(cfg).n !== cfg.n){ $('slCfgErr').textContent = tr('sl.cfgErr'); return; }
+    PL.slotCfg = cfg; savePlan(); toast(tr('sl.cfgOk')); return renderSlots(); } });
+/* ---- Today's reading plan: one row per subject, for today; a reminder lists the rows not yet done ---- */
+const dpTodayRows = () => PL.dayPlans.filter(x => x.date === today());
+function renderDayPlan(){ const el = $('dayPlanTop'); if(!el || !PL || !PL.dayPlans || !state) return;
+  const rows = dpTodayRows(), off = !(state.settings || {}).remOn, cfg = PL.dayPlanCfg || {remAt: ''};
+  const lines = PL.subjects.map(s => ({sid: s.id, name: s.name, color: s.color || '#94a3b8'})).concat([{sid: '', name: tr('dp.other'), color: '#cbd5e1'}]);
+  const line = l => { const r = rows.find(x => x.sid === l.sid) || {text: '', mins: 0, done: false};
+    return `<tr><th scope="row"><span class="dp-dot" style="background:${esc(l.color)}"></span>${esc(l.name)}</th>`
+      + `<td data-label="${esc(tr('dp.colWhat'))}"><input type="text" maxlength="300" data-sid="${esc(l.sid)}" data-f="text" value="${esc(r.text)}" aria-label="${esc(tr('dp.colWhat'))}"></td>`
+      + `<td data-label="${esc(tr('dp.colMins'))}"><input type="number" min="0" max="1440" step="5" data-sid="${esc(l.sid)}" data-f="mins" value="${r.mins || ''}" aria-label="${esc(tr('dp.colMins'))}"></td>`
+      + `<td data-label="${esc(tr('dp.colDone'))}"><input type="checkbox" data-sid="${esc(l.sid)}" data-f="done"${r.done ? ' checked' : ''} aria-label="${esc(tr('dp.colDone'))}"></td></tr>`; };
+  el.innerHTML = `<h2 id="dpTitle">${esc(tr('dp.title'))}</h2><p class="small">${esc(tr('dp.desc'))}</p>`
+    + (PL.subjects.length ? '' : `<p class="small">${esc(tr('dp.noSubjects'))}</p>`)
+    + `<form id="dpForm" novalidate><div class="dp-scroll"><table class="dp-table"><thead><tr><th scope="col">${esc(tr('dp.colSubject'))}</th><th scope="col">${esc(tr('dp.colWhat'))}</th><th scope="col">${esc(tr('dp.colMins'))}</th><th scope="col">${esc(tr('dp.colDone'))}</th></tr></thead><tbody>${lines.map(line).join('')}</tbody></table></div>`
+    + `<div class="dp-foot"><label class="small" for="dpRemAt">${esc(tr('dp.remAt'))} <input id="dpRemAt" type="time" value="${esc(cfg.remAt || '')}"></label><button type="submit" class="primary">${esc(tr('dp.save'))}</button></div>`
+    + (off ? `<p class="small">${esc(tr('dp.off'))}</p>` : '') + `<p class="small" id="dpErr" role="alert"></p></form>`;
+}
+function updBell(){ const b = $('hmBellN'); if(!b || !PL || !PL.notif) return; const n = PL.notif.filter(x => !x.read).length;
+  b.textContent = n > 99 ? '99+' : String(n); b.hidden = n === 0; }
+$('dayPlanTop').addEventListener('submit', e => { if(!e.target.matches('#dpForm')) return; e.preventDefault();
+  const fail = m => { $('dpErr').textContent = m; }, by = {};
+  e.target.querySelectorAll('[data-sid]').forEach(el => { const k = el.dataset.sid; by[k] = by[k] || {text: '', mins: 0, done: false};
+    if(el.dataset.f === 'text') by[k].text = el.value.trim(); else if(el.dataset.f === 'mins') by[k].mins = el.value === '' ? 0 : Number(el.value); else by[k].done = el.checked; });
+  const vals = Object.values(by);
+  if(vals.some(r => !Number.isInteger(r.mins) || r.mins < 0 || r.mins > 1440)) return fail(tr('dp.minsErr'));
+  if(vals.some(r => !r.text && (r.mins > 0 || r.done))) return fail(tr('dp.needText'));
+  const t = today(), fresh = Object.keys(by).filter(k => by[k].text).map(k => ({id: rid('dp'), date: t, sid: k, text: by[k].text, mins: by[k].mins, done: by[k].done}));
+  PL.dayPlans = PL.dayPlans.filter(x => x.date !== t).concat(fresh);
+  const remAt = $('dpRemAt').value; PL.dayPlanCfg = {remAt: SL_RE.test(remAt) ? remAt : ''};
+  savePlan(); toast(tr('dp.saved')); renderDayPlan(); });
+/* ---- Study routine screen ---- */
+const RT = {mode: 'weekly', show: [0,1,2,3,4,5,6]};
+const rtDayNum = s => { const [y, m, d] = s.split('-').map(Number); return Date.UTC(y, m - 1, d) / 86400000; };
+const rtWd = s => new Date(rtDayNum(s) * 86400000).getUTCDay();
+const rtStart = () => (PL.routine && okDate(PL.routine.start)) ? PL.routine.start : today();
+function rtChipLabel(b){ if(b.kind === 'study'){ const sub = PL.subjects.find(x => x.id === b.sid); return sub ? sub.name : tr('rt.noSubject'); }
+  return b.label || tr(b.kind === 'break' ? 'rt.kBreak' : 'rt.kOther'); }
+function renderRoutine(){ const el = $('v-routine'); if(!el || !PL || !PL.routine || !state) return;
+  const keep = {}; ['rtDay','rtKind','rtSubj','rtLabel','rtFrom','rtTo','rtName','rtStart','rtGoal'].forEach(id => { const x = $(id); if(x) keep[id] = x.value; });
+  const R = PL.routine, t = today(), start = rtStart(), tdWd = rtWd(t);
+  const done = state.sessions.filter(x => x.date === t).reduce((a, x) => a + x.min, 0);
+  const planned = R.blocks.filter(b => b.kind === 'study' && b.wd === tdWd).reduce((a, b) => a + (slMin(b.end) - slMin(b.start)), 0);
+  const pct = R.goalMin > 0 ? Math.min(100, Math.round(done / R.goalMin * 100)) : 0, C = 2 * Math.PI * 42;
+  const dates = RT.mode === 'daily' ? [t] : (RT.mode === 'custom' ? RT.show : [0,1,2,3,4,5,6]).map(i => shiftDay(start, i));
+  const col = d => { const wd = rtWd(d), bl = R.blocks.filter(b => b.wd === wd).sort((p, q) => p.start < q.start ? -1 : p.start > q.start ? 1 : 0);
+    return `<section class="rt-col"><header><b>${esc(tr('rt.wd' + wd))}</b><span class="small">${esc(fmtDate(d))}</span></header>`
+      + (bl.length ? bl.map(b => `<div class="rt-chip rt-${b.kind}"><b>${esc(rtChipLabel(b))}</b><small>${esc(b.start)} – ${esc(b.end)}</small><button type="button" class="rt-del" data-del="${esc(b.id)}" aria-label="${esc(tr('rt.delAria'))}">×</button></div>`).join('')
+        : `<p class="small rt-none">${esc(tr('rt.none'))}</p>`) + `</section>`; };
+  const seg = [['weekly','rt.tabWeek'],['daily','rt.tabDay'],['custom','rt.tabCustom']].map(([k, l]) => `<button type="button" data-rtmode="${k}" class="${RT.mode === k ? 'on' : ''}" aria-pressed="${RT.mode === k}">${esc(tr(l))}</button>`).join('');
+  const showBox = RT.mode === 'custom' ? `<div class="rt-show">${[0,1,2,3,4,5,6].map(i => { const d = shiftDay(start, i); return `<label class="rt-chk"><input type="checkbox" data-show="${i}"${RT.show.includes(i) ? ' checked' : ''}> ${esc(tr('rt.wd' + rtWd(d)))} ${esc(fmtDate(d))}</label>`; }).join('')}</div>` : '';
+  const dayOpts = [0,1,2,3,4,5,6].map(k => `<option value="${k}">${esc(tr('rt.wd' + k))}</option>`).join('');
+  const subjOpts = `<option value="">${esc(tr('rt.noSubject'))}</option>` + PL.subjects.map(x => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('');
+  el.innerHTML = `<section class="card rt-head"><div class="rt-title"><span class="rt-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="17" rx="3"/><path d="M3 9h18M8 2v4M16 2v4"/><circle cx="16" cy="16" r="3"/></svg></span><div><h2>${esc(tr('rt.title'))}</h2><p class="small">${esc(tr('rt.desc'))}</p></div></div>`
+    + `<label class="rt-switch"><input type="checkbox" id="rtActive"${R.active ? ' checked' : ''}><span>${esc(tr('rt.active'))}</span></label></section>`
+    + `<div class="rt-bar"><div class="seg" role="group">${seg}</div><div class="rt-actions"><button type="button" id="rtReset">${esc(tr('rt.reset'))}</button><button type="submit" form="rtSettings" class="primary">${esc(tr('rt.save'))}</button></div></div>`
+    + showBox
+    + `<div class="rt-main"><form class="card rt-settings" id="rtSettings" novalidate><h3>${esc(tr('rt.settings'))}</h3>`
+    + `<label class="small" for="rtName">${esc(tr('rt.name'))}</label><input id="rtName" maxlength="80" value="${esc(R.name)}">`
+    + `<label class="small" for="rtStart">${esc(tr('rt.start'))}</label><input id="rtStart" type="date" value="${esc(start)}">`
+    + `<p class="small">${esc(tr('rt.repeat'))}</p>`
+    + `<label class="small" for="rtGoal">${esc(tr('rt.goal'))}</label><div class="rt-stepper"><button type="button" id="rtGoalMinus" aria-label="${esc(tr('rt.less'))}">−</button><input id="rtGoal" type="number" min="1" max="16" step="1" value="${Math.round(R.goalMin / 60)}"><button type="button" id="rtGoalPlus" aria-label="${esc(tr('rt.more'))}">+</button></div>`
+    + `<p class="small" id="rtSetErr" role="alert"></p></form>`
+    + `<div class="card rt-week"><div class="rt-scroll"><div class="rt-grid" style="--cols:${dates.length}">${dates.map(col).join('')}</div></div>`
+    + `<form id="rtAdd" class="rt-add" novalidate><h3>${esc(tr('rt.addTitle'))}</h3><div class="rt-fields">`
+    + `<label class="small">${esc(tr('rt.day'))}<select id="rtDay">${dayOpts}</select></label>`
+    + `<label class="small">${esc(tr('rt.kind'))}<select id="rtKind"><option value="study">${esc(tr('rt.kStudy'))}</option><option value="break">${esc(tr('rt.kBreak'))}</option><option value="other">${esc(tr('rt.kOther'))}</option></select></label>`
+    + `<label class="small">${esc(tr('rt.subject'))}<select id="rtSubj">${subjOpts}</select></label>`
+    + `<label class="small">${esc(tr('rt.label'))}<input id="rtLabel" maxlength="80"></label>`
+    + `<label class="small">${esc(tr('rt.from'))}<input id="rtFrom" type="time" value="09:00"></label>`
+    + `<label class="small">${esc(tr('rt.to'))}<input id="rtTo" type="time" value="10:00"></label></div>`
+    + `<p class="small" id="rtErr" role="alert"></p><button type="submit" class="primary">${esc(tr('rt.add'))}</button></form></div></div>`
+    + `<div class="rt-bottom">`
+    + `<section class="card rt-sum"><h3>${esc(tr('rt.summary'))}</h3><div class="rt-sumrow"><div><span class="small">${esc(tr('rt.sGoal'))}</span><b>${esc(dur(R.goalMin))}</b></div><div><span class="small">${esc(tr('rt.sDone'))}</span><b>${esc(dur(done))}</b></div><div><span class="small">${esc(tr('rt.sPlan'))}</span><b>${esc(dur(planned))}</b></div></div>`
+    + `<div class="rt-prog"><svg viewBox="0 0 100 100" class="rt-ring" aria-hidden="true"><circle cx="50" cy="50" r="42" class="rt-ring-bg"/><circle cx="50" cy="50" r="42" class="rt-ring-fg" stroke-dasharray="${C.toFixed(2)}" stroke-dashoffset="${(C * (1 - pct / 100)).toFixed(2)}"/></svg><div><b>${pct}%</b><p class="small">${esc(tr('rt.sProg'))}</p></div></div></section>`
+    + `<section class="card rt-qa"><h3>${esc(tr('rt.qa'))}</h3><div class="rt-qa-grid"><button type="button" data-qa="study">${esc(tr('rt.qaStudy'))}</button><button type="button" data-qa="break">${esc(tr('rt.qaBreak'))}</button><button type="button" data-qa="edit">${esc(tr('rt.qaEdit'))}</button><a class="rt-link" href="calendar.html" data-go="calendar">${esc(tr('rt.qaCal'))}</a></div></section>`
+    + `<section class="card rt-tips"><h3>${esc(tr('rt.tips'))}</h3><p>${esc(tr('rt.tip1'))}</p><p>${esc(tr('rt.tip2'))}</p><p>${esc(tr('rt.tip3'))}</p></section>`
+    + `</div>`;
+  Object.keys(keep).forEach(id => { const x = $(id); if(x) x.value = keep[id]; });
+}
+$('v-routine').addEventListener('click', e => { const b = e.target.closest('button'); if(!b || !PL || !PL.routine) return;
+  if(b.dataset.rtmode){ RT.mode = b.dataset.rtmode; return renderRoutine(); }
+  if(b.id === 'rtGoalMinus' || b.id === 'rtGoalPlus'){ const g = $('rtGoal'); g.value = Math.min(16, Math.max(1, (Number(g.value) || 1) + (b.id === 'rtGoalPlus' ? 1 : -1))); return; }
+  if(b.dataset.qa === 'study') return go('focus');
+  if(b.dataset.qa === 'break'){ $('rtKind').value = 'break'; $('rtLabel').focus(); return; }
+  if(b.dataset.qa === 'edit'){ $('rtName').focus(); return; }
+  if(b.id === 'rtReset'){ ask(tr('rt.resetConfirm'), tr('rt.reset')).then(ok => { if(!ok) return; PL.routine.blocks = []; savePlan(); toast(tr('rt.resetDone')); renderRoutine(); }); return; }
+  if(b.dataset.del){ ask(tr('rt.delConfirm'), tr('rt.delAria')).then(ok => { if(!ok) return; PL.routine.blocks = PL.routine.blocks.filter(x => x.id !== b.dataset.del); savePlan(); toast(tr('rt.deleted')); renderRoutine(); }); } });
+$('v-routine').addEventListener('change', e => { if(!PL || !PL.routine) return;
+  if(e.target.id === 'rtActive'){ PL.routine.active = e.target.checked; savePlan(); return; }
+  if(e.target.dataset && e.target.dataset.show !== undefined){ const i = Number(e.target.dataset.show);
+    RT.show = e.target.checked ? RT.show.concat(i).sort((p, q) => p - q) : RT.show.filter(x => x !== i); renderRoutine(); } });
+$('v-routine').addEventListener('submit', e => { e.preventDefault(); if(!PL || !PL.routine) return;
+  if(e.target.id === 'rtSettings'){ const err = $('rtSetErr'), st = $('rtStart').value, g = Number($('rtGoal').value);
+    if(!okDate(st)){ err.textContent = tr('rt.startErr'); return; }
+    if(!Number.isInteger(g) || g < 1 || g > 16){ err.textContent = tr('rt.goalErr'); return; }
+    const R = PL.routine; R.name = $('rtName').value.trim().slice(0, 80) || tr('rt.defName'); R.start = st; R.goalMin = g * 60;
+    savePlan(); toast(tr('rt.saved')); return renderRoutine(); }
+  if(e.target.id === 'rtAdd'){ const err = $('rtErr'), wd = Number($('rtDay').value), kind = $('rtKind').value, s = $('rtFrom').value, en = $('rtTo').value, label = $('rtLabel').value.trim().slice(0, 80), sid = $('rtSubj').value;
+    if(!SL_RE.test(s) || !SL_RE.test(en) || slMin(en) <= slMin(s)){ err.textContent = tr('rt.timeErr'); return; }
+    if(kind !== 'study' && !label){ err.textContent = tr('rt.needLabel'); return; }
+    if(PL.routine.blocks.some(b => b.wd === wd && slMin(b.start) < slMin(en) && slMin(s) < slMin(b.end))){ err.textContent = tr('rt.overlap'); return; }
+    PL.routine.blocks.push({id: rid('rb'), wd, start: s, end: en, kind, sid: kind === 'study' ? sid : '', label: kind === 'study' ? '' : label});
+    savePlan(); toast(tr('rt.added')); return renderRoutine(); } });
+function planRender(){ renderDayPlan(); updBell(); if(!$('v-routine').hidden) renderRoutine(); if(!$('v-slots').hidden) renderSlots(); if($('v-qbank') && !$('v-qbank').hidden) { try{ renderQBank(); }catch(e){} } renderRevision(); renderHabits(); renderJournal(false); renderSubjects(); renderTasks(); renderNotes(); renderHomeTasks(); renderExams(); renderHomeExams(); renderPlanner(); renderHomePlans(); renderCalendar(); renderLibrary(); syncRemUI(); checkReminders(); }
+const _go2 = go; go = function(v, fromPop){ if(NE && v!=='notes') closeNote(); _go2(v, fromPop); planRender(); };
+const _rd2 = render; render = function(){ _rd2(); planRender(); };
+planRender();
+
+/* ===== Slide-out navigation drawer: open/close, swipe, focus handling. Navigation itself reuses the app's data-go handler. ===== */
+(function(){
+  const dr = $('drawer'), sc = $('drawerScrim'), op = $('drawerOpen'), cl = $('drawerClose');
+  if(!dr || !sc || !op) return;
+  const root = document.documentElement, wide = matchMedia('(min-width:1024px)');
+  const isOpen = () => dr.classList.contains('open');
+  const blocked = () => wide.matches || document.body.classList.contains('onboard');
+
+  function sync(){   /* refresh the parts that change while the drawer is closed */
+    dr.querySelectorAll('.dr-item[data-go]').forEach(b => b.setAttribute('aria-current', b.dataset.go === curView ? 'page' : 'false'));
+    $('drName').textContent = profName || tr('nav.profile');
+    paintAvatar($('drAv'), profName || '', prof && prof.pic);
+    const src = $('moreBadge'), bd = $('drBadge');
+    if(bd){ bd.hidden = !src || src.hidden; bd.textContent = src ? src.textContent : ''; }
+  }
+  function setOpen(on, keepFocus){
+    if(on === isOpen()) return;
+    if(on){
+      if(blocked()) return;
+      if(typeof closePops === 'function') closePops();
+      sync();
+      dr.inert = false; dr.classList.add('open'); sc.classList.add('open');
+      root.classList.add('dr-lock'); op.setAttribute('aria-expanded', 'true');
+      setTimeout(() => { if(isOpen()) cl.focus({preventScroll:true}); }, 40);
+    } else {
+      const hadFocus = dr.contains(document.activeElement);
+      dr.classList.remove('open'); sc.classList.remove('open'); dr.inert = true;
+      root.classList.remove('dr-lock'); op.setAttribute('aria-expanded', 'false');
+      if(hadFocus && !keepFocus) op.focus({preventScroll:true});
+    }
+  }
+
+  op.addEventListener('click', () => setOpen(!isOpen()));
+  cl.addEventListener('click', () => setOpen(false));
+  sc.addEventListener('click', () => setOpen(false));
+  dr.addEventListener('click', e => {
+    const b = e.target.closest('button'); if(!b) return;
+    if(b.id === 'drLogout'){ setOpen(false, true); $('logoutBtn').click(); }
+    else if(b.dataset.go) setOpen(false, true);      /* the document-level data-go handler then navigates */
+  });
+
+  document.addEventListener('keydown', e => {
+    if(!isOpen()) return;
+    if(e.key === 'Escape'){ e.preventDefault(); setOpen(false); return; }
+    if(e.key !== 'Tab') return;
+    const f = [...dr.querySelectorAll('button:not([hidden])')]; if(!f.length) return;
+    const first = f[0], last = f[f.length - 1];
+    if(e.shiftKey && document.activeElement === first){ e.preventDefault(); last.focus(); }
+    else if(!e.shiftKey && document.activeElement === last){ e.preventDefault(); first.focus(); }
+  });
+  window.addEventListener('popstate', () => setOpen(false, true));
+  window.addEventListener('hashchange', () => setOpen(false, true));
+  const onWide = e => { if(e.matches) setOpen(false, true); };
+  if(wide.addEventListener) wide.addEventListener('change', onWide); else if(wide.addListener) wide.addListener(onWide);
+
+  /* Swipe from the left edge to open */
+  let eg = null;
+  document.addEventListener('touchstart', e => {
+    if(isOpen() || blocked() || e.touches.length !== 1 || document.querySelector('dialog[open]')){ eg = null; return; }
+    const t = e.touches[0]; eg = t.clientX <= 22 ? {x:t.clientX, y:t.clientY} : null;
+  }, {passive:true});
+  document.addEventListener('touchmove', e => {
+    if(!eg) return;
+    const t = e.touches[0], dx = t.clientX - eg.x, dy = t.clientY - eg.y;
+    if(Math.abs(dy) > 12 && Math.abs(dy) > Math.abs(dx)){ eg = null; return; }
+    if(dx > 56){ eg = null; setOpen(true); }
+  }, {passive:true});
+  ['touchend','touchcancel'].forEach(n => document.addEventListener(n, () => { eg = null; }, {passive:true}));
+
+  /* Drag the open drawer to the left to close it */
+  let dg = null;
+  dr.addEventListener('touchstart', e => { if(!isOpen() || e.touches.length !== 1){ dg = null; return; } const t = e.touches[0]; dg = {x:t.clientX, y:t.clientY, dx:0, on:false}; }, {passive:true});
+  dr.addEventListener('touchmove', e => {
+    if(!dg) return;
+    const t = e.touches[0], dx = t.clientX - dg.x, dy = t.clientY - dg.y;
+    if(!dg.on){
+      if(Math.abs(dy) > 10 && Math.abs(dy) >= Math.abs(dx)){ dg = null; return; }
+      if(dx < -10 && Math.abs(dx) > Math.abs(dy) * 1.5){ dg.on = true; dr.style.transition = sc.style.transition = 'none'; } else return;
+    }
+    dg.dx = Math.min(0, dx);
+    dr.style.transform = 'translateX(' + dg.dx + 'px)';
+    sc.style.opacity = String(Math.max(0, 1 + dg.dx / dr.offsetWidth));
+  }, {passive:true});
+  const endDrag = () => {
+    if(!dg) return; const d = dg; dg = null; if(!d.on) return;
+    dr.style.transition = sc.style.transition = ''; dr.style.transform = sc.style.opacity = '';
+    if(d.dx < -70) setOpen(false, true);
+  };
+  dr.addEventListener('touchend', endDrag, {passive:true}); dr.addEventListener('touchcancel', endDrag, {passive:true});
+})();
+
+/* ================= Home: study-time card (timer + manual entry), daily goal, weekly chart, recent activity =================
+   The live session is a count-up stopwatch stored as timestamp segments under KEY+'.liveSession'. Elapsed time is always
+   computed from Date.now(), so refreshes, background tabs and suspended devices stay accurate, and paused time is never counted.
+   Finishing writes ordinary study sessions (src 'timer') through putSession(). Their ids are derived from the live session id,
+   so the same session can never be stored twice. Totals, streaks, insights and achievements keep reading only state.sessions. */
+Object.assign(I18N.en,{'hm.weekTitle':'This week','hm.gbTarget':'Daily target {h} h','hm.tabTimer':'Timer','hm.tabManual':'Manual','hm.sessLbl':'Sessions today',
+  'hm.changeGoal':'Change goal','hm.ringLbl':'of daily goal','hm.weekTgt':'Weekly target {d}','hm.ofTxt':'{a} of {b}','hm.streakTxt':'{c}, best {l}',
+  'hm.achTitle':'Achievements','hm.achCount':'{n} of {t} unlocked','hm.gDaily':'Daily goal','hm.gWeekly':'Weekly goal','hm.gStreak':'Streak',
+  'hm.goalsTitle':'Goals and achievements','hm.recentTitle':'Recent activity','hm.recentNone':'No finished sessions yet. Sessions you complete will appear here.',
+  'hm.recLive':'Live timer','hm.recFocus':'Pomodoro','hm.recManual':'Added by hand','hm.recLegacy':'Imported','hm.emptyT':'Your journey starts today.',
+  'hm.emptyB':'Complete your first study session to see your progress.',
+  'qa.pomo':'Start Pomodoro','qa.pomoD':'Timed focus rounds with breaks','qa.task':'Add task','qa.taskD':'Plan what comes next',
+  'qa.sched':'View schedule','qa.schedD':'Open the study planner','qa.note':'Add note','qa.noteD':'Write something down','home.focusTitle':'Daily goal',
+  'ls.ready':'Ready when you are','ls.running':'Studying now','ls.paused':'Paused','ls.start':'Start studying','ls.pause':'Pause','ls.resume':'Resume',
+  'ls.finish':'Finish','ls.reset':'Reset','ls.discard':'Discard','ls.subject':'Subject','ls.noSubject':'No subject','ls.newSubject':'New subject…',
+  'ls.newLbl':'New subject name','ls.clockLbl':'Elapsed study time','ls.nameReq':'Enter a subject name, up to 30 characters.','ls.subLimit':'You can have up to 100 subjects.',
+  'ls.hint':'Time comes from the clock, so a refresh or a tab switch will not lose it.','ls.hintRun':'Counting now. Pausing stops the clock, and paused time is never saved.',
+  'ls.hintPause':'Paused. Time spent paused is not counted. Resume to keep going.','ls.pomoBusy':'The Focus timer is running. Pause or finish it before starting a study session.',
+  'ls.liveBusy':'A study session is running. Finish it before starting the Focus timer.','ls.saved':'Session saved: {d}.',
+  'ls.notSaved':'The session could not be saved, so it is still here. Press Finish again.','ls.storeFail':'Could not save. Storage may be full or blocked.',
+  'ls.shortConfirm':'This session is under one minute, so it will not be saved. Discard it?','ls.resetConfirm':'Discard this session? Its time will not be saved.',
+  'ls.gapMsg':'The app last saw this session about {d} ago. Press OK to count that time as study, or Cancel to stop the session at the last time the app saw it.',
+  'ls.gapKeep':'Count it','ls.gapStopped':'Session stopped at the last time the app saw it.',
+  'ls.corrupt':'A session timer could not be read. It was kept as a backup, and no study records were changed.',
+  'ls.capped':"Only the minutes left in today's 24-hour limit were saved."});
+Object.assign(I18N.bn,{'hm.weekTitle':'এই সপ্তাহ','hm.gbTarget':'দৈনিক লক্ষ্য {h} ঘণ্টা','hm.tabTimer':'টাইমার','hm.tabManual':'নিজে লিখুন','hm.sessLbl':'আজকের সেশন',
+  'hm.changeGoal':'লক্ষ্য বদলান','hm.ringLbl':'দৈনিক লক্ষ্যের','hm.weekTgt':'সাপ্তাহিক লক্ষ্য {d}','hm.ofTxt':'{a} / {b}','hm.streakTxt':'এখন {c}, সর্বোচ্চ {l}',
+  'hm.achTitle':'অর্জন','hm.achCount':'{t}টির মধ্যে {n}টি অর্জিত','hm.gDaily':'দৈনিক লক্ষ্য','hm.gWeekly':'সাপ্তাহিক লক্ষ্য','hm.gStreak':'ধারাবাহিকতা',
+  'hm.goalsTitle':'লক্ষ্য ও অর্জন','hm.recentTitle':'সাম্প্রতিক কার্যক্রম','hm.recentNone':'এখনো কোনো সম্পন্ন সেশন নেই। শেষ করা সেশন এখানে দেখা যাবে।',
+  'hm.recLive':'লাইভ টাইমার','hm.recFocus':'Pomodoro','hm.recManual':'নিজে যোগ করা','hm.recLegacy':'আগের তথ্য','hm.emptyT':'আপনার যাত্রা আজই শুরু হোক।',
+  'hm.emptyB':'অগ্রগতি দেখতে প্রথম পড়ার সেশনটি শেষ করুন।',
+  'qa.pomo':'Pomodoro শুরু করুন','qa.pomoD':'বিরতিসহ সময়-বাঁধা ফোকাস','qa.task':'কাজ যোগ করুন','qa.taskD':'পরের কাজ ঠিক করুন',
+  'qa.sched':'সময়সূচি দেখুন','qa.schedD':'পড়ার পরিকল্পনা খুলুন','qa.note':'নোট যোগ করুন','qa.noteD':'কিছু লিখে রাখুন','home.focusTitle':'দৈনিক লক্ষ্য',
+  'ls.ready':'শুরু করতে প্রস্তুত','ls.running':'এখন পড়ছেন','ls.paused':'বিরতিতে','ls.start':'পড়া শুরু করুন','ls.pause':'বিরতি দিন','ls.resume':'আবার শুরু করুন',
+  'ls.finish':'শেষ করুন','ls.reset':'রিসেট','ls.discard':'বাতিল করুন','ls.subject':'বিষয়','ls.noSubject':'কোনো বিষয় নেই','ls.newSubject':'নতুন বিষয়…',
+  'ls.newLbl':'নতুন বিষয়ের নাম','ls.clockLbl':'পড়ার মোট সময়','ls.nameReq':'বিষয়ের নাম লিখুন, সর্বোচ্চ ৩০ অক্ষর।','ls.subLimit':'সর্বোচ্চ ১০০টি বিষয় রাখা যায়।',
+  'ls.hint':'সময় ঘড়ি থেকে মাপা হয়, তাই রিফ্রেশ বা ট্যাব বদলালেও সময় হারায় না।','ls.hintRun':'সময় গণনা চলছে। বিরতি দিলে ঘড়ি থামবে, বিরতির সময় সংরক্ষণ হয় না।',
+  'ls.hintPause':'বিরতিতে আছে। বিরতির সময় গণনা হয় না। চালিয়ে যেতে আবার শুরু করুন।','ls.pomoBusy':'Focus টাইমার চলছে। পড়া শুরুর আগে সেটি বিরতি দিন বা শেষ করুন।',
+  'ls.liveBusy':'একটি পড়ার সেশন চলছে। Focus টাইমার শুরুর আগে সেটি শেষ করুন।','ls.saved':'সেশন সংরক্ষিত হয়েছে: {d}।',
+  'ls.notSaved':'সেশনটি সংরক্ষণ করা যায়নি, তাই এটি এখনো আছে। আবার শেষ করুন চাপুন।','ls.storeFail':'সংরক্ষণ করা যায়নি। স্টোরেজ পূর্ণ বা বন্ধ থাকতে পারে।',
+  'ls.shortConfirm':'সেশনটি এক মিনিটের কম, তাই সংরক্ষণ হবে না। বাতিল করবেন?','ls.resetConfirm':'এই সেশন বাতিল করবেন? এর সময় সংরক্ষণ হবে না।',
+  'ls.gapMsg':'অ্যাপটি এই সেশনটি শেষবার প্রায় {d} আগে দেখেছিল। ওই সময়টুকু পড়াশোনা হিসেবে যোগ করতে OK চাপুন, অথবা শেষ দেখার সময়ে সেশন থামাতে Cancel চাপুন।',
+  'ls.gapKeep':'যোগ করুন','ls.gapStopped':'অ্যাপের শেষ দেখা সময়ে সেশনটি থামানো হয়েছে।',
+  'ls.corrupt':'সেশনের টাইমার পড়া যায়নি। এটি একটি ব্যাকআপে রাখা হয়েছে, পড়াশোনার কোনো রেকর্ড বদলানো হয়নি।',
+  'ls.capped':'আজকের ২৪ ঘণ্টার সীমায় যতটুকু বাকি ছিল শুধু ততটুকুই সংরক্ষণ হয়েছে।'});
+
+const LSKEY = KEY + '.liveSession', LS_GAP = 5*60e3, LS_BEAT = 15e3, LS_MAX = 5000;
+let LS = null;                       // {id, sub, segs:[[startMs, endMs|null], ...], seen} while a session exists; null when idle
+let lsSaving = false, lsLastSec = -1, lsLastMin = -1, lsLastDay = today(), lsWasDone = null, lsDrawn = false, lsMainAt = 0, lsEndAt = 0;
+const lsRunning = () => !!LS && LS.segs[LS.segs.length-1][1] === null;
+const lsBusy = () => T.run || (T.phase==='focus' && !!T.runId);          // the Pomodoro timer is counting, or paused mid-round
+const lsErr = msg => { $('lsErr').textContent = msg || ''; };
+function lsElapsed(now){ if(!LS) return 0; return LS.segs.reduce((a,g) => a + Math.max(0, (g[1]===null ? now : g[1]) - g[0]), 0); }
+function lsTodayMs(now){                                                  // only the part of the session that falls on today's date
+  if(!LS) return 0; const d0 = new Date(); d0.setHours(0,0,0,0); const t0 = d0.getTime();
+  return LS.segs.reduce((a,g) => { const s = Math.max(g[0], t0), e = Math.min(g[1]===null ? now : g[1], now); return a + Math.max(0, e - s); }, 0);
+}
+const lsTodayMin = now => Math.round(lsTodayMs(now)/60e3);
+const fmtClock = ms => { const s = Math.floor(ms/1000); return `${pad(Math.floor(s/3600))}:${pad(Math.floor(s/60)%60)}:${pad(s%60)}`; };
+
+/* Storage: the saved record is checked on load, and anything unreadable is kept under a backup key first */
+function lsLoad(){
+  let raw = null; try{ raw = localStorage.getItem(LSKEY); }catch(e){ return null; }
+  if(raw===null) return null;
+  try{
+    const d = JSON.parse(raw), g = d && d.segs;
+    const ok = typeof d.id==='string' && /^[\w-]{1,64}$/.test(d.id) && Number.isFinite(d.seen) && Array.isArray(g) && g.length>0 && g.length<=LS_MAX
+      && g.every((p,i) => Array.isArray(p) && p.length===2 && Number.isFinite(p[0]) && p[0]>0
+        && (p[1]===null ? i===g.length-1 : (Number.isFinite(p[1]) && p[1]>=p[0]))
+        && (i===0 || (g[i-1][1]!==null && g[i-1][1]<=p[0])));
+    if(!ok) throw new Error('invalid');
+    return {id:d.id, sub:cstr(d.sub,30), segs:g.map(p => [p[0], p[1]]), seen:d.seen};
+  }catch(e){
+    try{ localStorage.setItem(LSKEY+'.corrupt-'+Date.now(), raw); localStorage.removeItem(LSKEY); }catch(e2){}
+    toast(tr('ls.corrupt')); return null;
+  }
+}
+function lsSave(){
+  try{
+    if(!LS){ localStorage.removeItem(LSKEY); return true; }
+    LS.seen = Date.now();
+    localStorage.setItem(LSKEY, JSON.stringify({v:1, id:LS.id, sub:LS.sub, segs:LS.segs, seen:LS.seen}));
+    return true;
+  }catch(e){ return false; }
+}
+/* Confirms that every session id really reached storage, so the UI never reports a save that did not happen */
+function lsStoredAll(ids){
+  try{ const s = JSON.parse(localStorage.getItem(KEY)||'null'), have = new Set(s && Array.isArray(s.sessions) ? s.sessions.map(x => x.id) : []);
+    return ids.every(i => have.has(i)); }catch(e){ return false; }
+}
+
+/* Subject: an existing name, none, or a new name that is added to the subject list */
+function lsResolveSub(){
+  const v = $('lsSub').value;
+  if(v!=='__new') return v;
+  const name = $('lsNewSub').value.replace(/\s+/g,' ').trim().slice(0,30);
+  if(!name){ lsErr(tr('ls.nameReq')); return null; }
+  const ex = state.subjects.find(s => s.toLowerCase()===name.toLowerCase());
+  if(ex) return ex;
+  if(state.subjects.length>=100){ lsErr(tr('ls.subLimit')); return null; }
+  state.subjects.push(name); persist(); fillSubjects();
+  return name;
+}
+
+/* Controls */
+function lsStart(){
+  if(LS || lsSaving || locked()) return;
+  if(lsBusy()) return toast(tr('ls.pomoBusy'));
+  lsErr('');
+  const sub = lsResolveSub(); if(sub===null) return;
+  const now = Date.now();
+  LS = {id:'ls'+now.toString(36)+Math.random().toString(36).slice(2,6), sub, segs:[[now,null]], seen:now};
+  if(!lsSave()){ LS = null; toast(tr('ls.storeFail')); return; }
+  $('lsSub').value = sub; $('lsNewSub').value = ''; lsLastSec = -1; lsLastMin = -1;
+  lsRender(); renderHomeV2();
+}
+function lsPause(){
+  if(!lsRunning() || lsSaving) return;
+  const g = LS.segs[LS.segs.length-1]; g[1] = Math.max(g[0], Date.now());
+  if(!lsSave()){ g[1] = null; return toast(tr('ls.storeFail')); }
+  lsRender(); renderHomeV2();
+}
+function lsResume(){
+  if(!LS || lsRunning() || lsSaving) return;
+  if(lsBusy()) return toast(tr('ls.pomoBusy'));
+  LS.segs.push([Date.now(), null]);
+  if(!lsSave()){ LS.segs.pop(); return toast(tr('ls.storeFail')); }
+  lsRender();
+}
+function lsToggle(){ if(!LS) return lsStart(); return lsRunning() ? lsPause() : lsResume(); }
+
+/* Finish: active time is summed per calendar day and rounded once; one record per day; the live record is cleared only after every write is confirmed */
+async function lsFinish(){
+  if(!LS || lsSaving || locked()) return;
+  lsSaving = true;
+  try{
+    const now = Date.now();
+    const segs = LS.segs.map(g => [g[0], g[1]===null ? Math.max(g[0], now) : g[1]]);
+    const total = segs.reduce((a,g) => a + (g[1]-g[0]), 0);
+    if(total < 60e3){
+      if(!(await ask(tr('ls.shortConfirm'), tr('ls.discard')))) return;
+      if(LS){ LS = null; lsSave(); }
+      return;
+    }
+    const byDay = new Map();
+    segs.forEach(g => { let a = g[0]; while(a < g[1]){ const d = new Date(a), next = new Date(d.getFullYear(), d.getMonth(), d.getDate()+1).getTime(), b = Math.min(g[1], next), k = dkey(d), r = byDay.get(k) || {ms:0, start:a, end:b}; r.ms += b-a; r.end = Math.max(r.end, b); byDay.set(k, r); a = b; } });
+    const chunks = [...byDay.entries()].map(([date, r]) => ({date, min: Math.round(r.ms/60e3), start: r.start, end: r.end})).filter(c => c.min > 0);
+    const prev = state.sessions.slice(), ids = []; let savedMin = 0, capped = false, err = '';
+    chunks.forEach((c, i) => {
+      if(err) return;
+      const id = chunks.length>1 ? LS.id+'_'+i : LS.id;
+      const min = Math.min(c.min, 1440 - dayTotal(c.date, id));
+      if(min < c.min) capped = true;
+      if(min < 1) return;
+      err = putSession({id, date:c.date, min, sub:LS.sub, note:'', src:'timer', start:c.start, end:c.end}) || '';
+      if(!err){ ids.push(id); savedMin += min; }
+    });
+    if(err || !ids.length || !lsStoredAll(ids)){             // nothing is claimed as saved: undo the in-memory change and keep the live session
+      state.sessions = prev; rebuild(); persist();
+      if(!ids.length && !err){ LS = null; lsSave(); toast(tr('ls.capped')); }
+      else toast(err || tr('ls.notSaved'));
+      return;
+    }
+    LS = null; lsSave(); lsEndAt = Date.now();
+    checkAch(true); render();
+    toast(tr('ls.saved',{d: dur(savedMin)}) + (capped ? ' ' + tr('ls.capped') : ''));
+  }finally{ lsSaving = false; lsRender(); }
+}
+async function lsReset(){
+  if(!LS || lsSaving) return;
+  if(lsElapsed(Date.now()) > 0 && !(await ask(tr('ls.resetConfirm'), tr('ls.discard')))) return;
+  if(!LS) return;
+  LS = null; lsSave(); lsEndAt = Date.now(); lsRender(); renderHomeV2();
+}
+
+/* Display: the clock refreshes every quarter second from timestamps; the Home figures refresh when the minute changes */
+function lsRender(){
+  const card = $('liveCard'); if(!card) return;
+  const now = Date.now(), st = !LS ? 'idle' : lsRunning() ? 'running' : 'paused', sel = $('lsSub').value;
+  card.dataset.state = st;
+  $('lsStatus').textContent = tr(st==='idle' ? 'ls.ready' : st==='running' ? 'ls.running' : 'ls.paused');
+  $('lsClock').textContent = fmtClock(lsElapsed(now));
+  $('lsMain').textContent = tr(st==='idle' ? 'ls.start' : st==='running' ? 'ls.pause' : 'ls.resume');
+  $('lsMain').disabled = lsSaving;
+  $('lsExtra').hidden = !LS;
+  $('lsFinish').disabled = lsSaving; $('lsReset').disabled = lsSaving;
+  $('lsSub').disabled = !!LS || lsSaving;
+  $('lsNewWrap').hidden = !!LS || sel!=='__new';
+  $('lsSubNow').textContent = LS ? (LS.sub || tr('ls.noSubject')) : (sel==='__new' ? tr('ls.newSubject') : (sel || tr('ls.noSubject')));
+  $('lsHint').textContent = tr(st==='running' ? 'ls.hintRun' : st==='paused' ? 'ls.hintPause' : 'ls.hint');
+}
+function lsTick(){
+  const now = Date.now();
+  if(today()!==lsLastDay){ lsLastDay = today(); renderHomeV2(); }
+  if(!LS) return;
+  const ms = lsElapsed(now), sec = Math.floor(ms/1000);
+  if(sec!==lsLastSec){ lsLastSec = sec; $('lsClock').textContent = fmtClock(ms); }
+  if(lsRunning() && now - LS.seen >= LS_BEAT) lsSave();                    // heartbeat: the last time the app was alive is always stored
+  const tm = lsTodayMin(now);
+  if(tm!==lsLastMin){ lsLastMin = tm; renderHomeV2(); }
+}
+
+/* Study-time card: Timer and Manual are two views of one card. Only one is visible at a time; both keep their state. */
+function setAddTab(name){
+  const m = name==='manual';
+  $('atTimer').hidden = m; $('atManual').hidden = !m;
+  $('tabTimer').setAttribute('aria-selected', String(!m)); $('tabManual').setAttribute('aria-selected', String(m));
+  $('tabTimer').tabIndex = m ? -1 : 0; $('tabManual').tabIndex = m ? 0 : -1;
+  $('tabTimer').classList.toggle('on', !m); $('tabManual').classList.toggle('on', m);
+}
+
+/* Home figures: every number comes from state.sessions plus the live session, never from a separate counter */
+function renderHomeV2(){
+  if(!$('liveCard')) return;
+  const now = Date.now(), t = today(), tgt = state.settings.targetMin || 0;
+  const liveToday = lsTodayMin(now), savedToday = state.entries[t] || 0, todayMin = savedToday + liveToday;
+  const x = stats(); let cur = x.cur, longest = Math.max(x.longest, x.cur);
+  if(liveToday>0 && !savedToday){ cur += 1; longest = Math.max(longest, cur); }        // today counts once the live session has time on it
+  const pct = tgt ? todayMin/tgt*100 : 0, pctC = Math.min(100, pct), remain = Math.max(0, tgt - todayMin), done = tgt>0 && todayMin>=tgt;
+  const dayWord = n => n===1 ? tr('day.one') : tr('day.many',{n});
+
+  // Greeting bar: date and daily target (the date text is written by renderBase)
+  $('gbTarget').textContent = tr('hm.gbTarget', {h: +(tgt/60).toFixed(1)});
+
+  // Study-time card: today's progress strip
+  $('tProg').textContent = `${+(todayMin/60).toFixed(1)} / ${+(tgt/60).toFixed(1)} ${tr('unit.hours')}`;
+  $('tFill').style.width = pctC + '%'; $('tFill').parentNode.setAttribute('aria-valuenow', Math.round(pctC));
+
+  // Daily goal card
+  $('tTime').textContent = dur(todayMin);
+  $('tPct').textContent = Math.round(pct) + '%';
+  $('hRing').style.strokeDashoffset = (163.4*(1-pctC/100)).toFixed(1);
+  $('tTgt').textContent = dur(tgt);
+  $('tRem').textContent = done ? tr('home.goalReached') : dur(remain);
+  $('gcSess').textContent = String(state.sessions.filter(z => z.date===t).length + (liveToday>0 ? 1 : 0));
+  $('tStreak').textContent = tr('home.streak', {n: cur});
+  $('homeNote').textContent = tr(todayMin===0 ? 'home.note0' : done ? 'home.note2' : 'home.note1');
+  const goalCard = $('goalCard');
+  if(goalCard){ goalCard.classList.toggle('hg-done', done); if(done && lsWasDone===false){ goalCard.classList.remove('hg-pop'); void goalCard.offsetWidth; goalCard.classList.add('hg-pop'); } }
+  lsWasDone = done;
+
+  // This week (Sunday start, the same week used by "This week" in Insights)
+  const ws = dAdd(new Date(), -new Date().getDay()), days = [];
+  for(let i=0;i<7;i++){ const d = dAdd(ws,i), k = dkey(d); days.push({d, k, min:(state.entries[k]||0) + (k===t ? liveToday : 0), fut:k>t, isToday:k===t}); }
+  const weekMin = days.reduce((a,z) => a + z.min, 0), weekTgt = tgt*7, weekPct = weekTgt ? weekMin/weekTgt*100 : 0;
+  $('wTotal').textContent = dur(weekMin);
+  $('wTgt').textContent = tr('hm.weekTgt', {d: dur(weekTgt)});
+  const maxV = Math.max(tgt, ...days.map(z => z.min), 1), H = 100, lineAt = 24 + tgt/maxV*H;
+  const wk = $('week');
+  wk.classList.toggle('hw-play', !lsDrawn); lsDrawn = true;
+  wk.innerHTML = `<i class="hw-line" style="bottom:${lineAt.toFixed(1)}px" aria-hidden="true"></i>` + days.map(z => {
+    const cls = ['hw-col', z.isToday?'today':'', z.fut?'future':'', !z.fut && z.min===0?'empty':'', !z.fut && tgt>0 && z.min>=tgt?'hit':''].filter(Boolean).join(' ');
+    const h = z.fut || z.min===0 ? 4 : Math.max(4, Math.round(z.min/maxV*H));
+    const val = !z.fut && z.min>0 ? (z.min/60).toFixed(1).replace(/\.0$/,'') : '';
+    return `<div class="${cls}" title="${esc(short(z.k))}: ${esc(dur(z.min))}"><span class="hw-val">${val}</span><div class="hw-bar" style="height:${h}px"></div><small class="hw-day">${(bn()?BN_DAYS:EN_DAYS)[z.d.getDay()]}</small></div>`;
+  }).join('');
+
+  // Goals and achievements
+  $('gDailyV').textContent = tr('hm.ofTxt',{a: dur(todayMin), b: dur(tgt)});
+  $('gDailyBar').style.width = pctC + '%';
+  $('gWeekV').textContent = tr('hm.ofTxt',{a: dur(weekMin), b: dur(weekTgt)});
+  $('gWeekBar').style.width = Math.min(100, weekPct) + '%';
+  $('gStreakV').textContent = tr('hm.streakTxt',{c: dayWord(cur), l: dayWord(longest)});
+  const unlocked = ACH.filter(a => a[3](x)).length;
+  $('hAchCount').textContent = tr('hm.achCount',{n:unlocked, t:ACH.length});
+  $('hAch').innerHTML = ACH.map(a => { const on = a[3](x); return `<span class="hgl-chip${on?' on':''}" title="${esc(tr(ACHL[a[1]][1]))}">${a[0]}<span>${esc(tr(ACHL[a[1]][0]))}</span></span>`; }).join('');
+
+  // Recent activity: newest first, straight from the stored sessions
+  const rec = state.sessions.slice(-6).reverse();
+  $('recList').innerHTML = rec.length ? rec.map(z => {
+    const when = z.start ? (() => { const d = new Date(z.start); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; })() : '';
+    const tag = z.src==='manual' ? tr('hm.recManual') : z.src==='legacy' ? tr('hm.recLegacy') : String(z.id).startsWith('ls') ? tr('hm.recLive') : tr('hm.recFocus');
+    return `<div class="rc-item"><div class="rc-main"><b>${esc(z.sub || tr('sub.none'))}</b><small>${esc(short(z.date))}${when ? ', '+when : ''}</small></div><div class="rc-end"><b class="rc-dur">${esc(dur(z.min))}</b><span class="rc-tag">${esc(tag)}</span></div></div>`;
+  }).join('') : `<p class="rc-none">${esc(tr('hm.recentNone'))}</p>`;
+
+  lsRender();
+}
+
+/* A fixed short bridge between the old focus-timer code and the Home live session */
+function fillLive(){
+  const el = $('lsSub'), cur = el.value;
+  el.innerHTML = `<option value="">${esc(tr('ls.noSubject'))}</option>` + state.subjects.map(s => `<option>${esc(s)}</option>`).join('') + `<option value="__new">${esc(tr('ls.newSubject'))}</option>`;
+  el.value = [...el.options].some(o => o.value===cur) ? cur : '';
+  lsRender();
+}
+
+/* Wiring. Existing handlers are wrapped, not replaced, so their behaviour is unchanged. */
+const _fillSubjects = fillSubjects; fillSubjects = function(){ _fillSubjects(); fillLive(); };
+const _tStartClick = $('tStart').onclick;
+$('tStart').onclick = e => { if(!T.run && LS){ toast(tr('ls.liveBusy')); return; } _tStartClick(e); };
+const _homeRender = render; render = function(){ _homeRender(); renderHomeV2(); };
+const _homeGo = go; go = function(v, fromPop){ _homeGo(v, fromPop); if(v==='home') renderHomeV2(); };
+
+/* A double click, or a click right after Finish/Reset, must not start or pause a second session */
+$('lsMain').onclick = () => { const n = Date.now(); if(n - lsMainAt < 500 || n - lsEndAt < 800) return; lsMainAt = n; lsToggle(); };
+$('lsFinish').onclick = () => lsFinish();
+$('lsReset').onclick = () => lsReset();
+$('lsSub').addEventListener('change', () => { lsErr(''); lsRender(); });
+$('lsNewSub').addEventListener('input', () => lsErr(''));
+$('lsNewSub').addEventListener('keydown', e => { if(e.key==='Enter'){ e.preventDefault(); lsToggle(); } });
+$('tabTimer').onclick = () => setAddTab('timer');
+$('tabManual').onclick = () => setAddTab('manual');
+[$('tabTimer'), $('tabManual')].forEach(b => b.addEventListener('keydown', e => {
+  if(e.key!=='ArrowLeft' && e.key!=='ArrowRight') return; e.preventDefault();
+  const m = b.id==='tabTimer' ? 'manual' : 'timer'; setAddTab(m); $(m==='manual' ? 'tabManual' : 'tabTimer').focus(); }));
+/* "Log study time" opens the manual entry, scrolls to it and focuses the hour field */
+document.querySelectorAll('[data-act="log"]').forEach(b => b.onclick = () => {
+  setAddTab('manual'); $('addCard').scrollIntoView({behavior: matchMedia('(prefers-reduced-motion:reduce)').matches ? 'auto' : 'smooth', block:'start'}); $('hIn').focus({preventScroll:true}); });
+document.querySelectorAll('#v-home [data-qa]').forEach(b => b.onclick = () => { const a = b.dataset.qa;
+  if(a==='task') $('htAdd').click();
+  else if(a==='schedule'){ PLV.mode = 'day'; PLV.day = today(); go('planner'); }
+  else if(a==='note'){ go('notes'); openNote(); } });
+$('hgChange').onclick = () => { go('settings'); setCat('study'); $('tgtIn').focus(); };
+$('hwInsights').onclick = () => go('insights');
+$('hrAll').onclick = () => go('history');
+window.addEventListener('pagehide', () => { if(LS) lsSave(); });
+document.addEventListener('visibilitychange', lsTick);
+window.addEventListener('storage', e => { if(e.key===LSKEY){ LS = lsLoad(); lsRender(); renderHomeV2(); } });
+
+/* Restore after a refresh. If the app was closed while a session ran for more than five minutes, ask before counting that time. */
+LS = lsLoad();
+if(LS && lsRunning() && Date.now() - LS.seen > LS_GAP){
+  const seenAt = LS.seen, gap = Date.now() - seenAt;
+  lsSaving = true; lsRender();
+  ask(tr('ls.gapMsg',{d: dur(Math.round(gap/60e3))}), tr('ls.gapKeep')).then(keep => {
+    lsSaving = false;
+    if(LS && !keep){ const g = LS.segs[LS.segs.length-1]; g[1] = Math.max(g[0], seenAt); lsSave(); toast(tr('ls.gapStopped')); }
+    lsRender(); renderHomeV2();
+  });
+}
+setAddTab('timer');
+fillLive(); renderHomeV2(); lsRender();
+setInterval(lsTick, 250);
+
+/* ================= Profile: edit-form wiring, counters, subject chips, daily-target link ================= */
+Object.assign(I18N.en,{'hm.sToday':'Studied today','prof.basicSec':'Basic information','prof.basicHint':'Your name and a short introduction.','prof.photoSec':'Photo and cover','prof.photoHint':'Shown on your profile card.','prof.eduSec':'Education','prof.eduHint':'Where you study and at what level.','prof.studySec':'Study preferences','prof.studyHint':'Helps personalise your study plan.','prof.contactSec':'Contact and personal','prof.contactHint':'All optional. Choose what is shown in Privacy below.','prof.privSec':'Privacy','prof.visHint':'Only the details you switch on appear on your profile.','prof.fullName':'Full name','prof.bioLbl':'Bio','prof.notSet':'Not set','prof.level':'Level of study','prof.lv_school':'School (SSC level)','prof.lv_college':'College (HSC level)','prof.lv_uni':'University','prof.lv_post':'Postgraduate','prof.lv_adm':'Admission preparation','prof.lv_self':'Self-learner','prof.lv_other':'Other','prof.instLbl':'Institution','prof.field':'Field or group','prof.fieldPh':'For example: Science, Commerce, Arts','prof.year':'Class or year','prof.yearPh':'For example: Class 11, Year 2','prof.time':'Preferred study time','prof.tm_early':'Early morning','prof.tm_morn':'Morning','prof.tm_aft':'Afternoon','prof.tm_eve':'Evening','prof.tm_night':'Night','prof.tm_vary':'It varies','prof.tgtLbl':'Daily target','prof.tgtVal':'{h} h, set in Settings','prof.subjects':'Main subjects','prof.subjHint':'Choose up to 12 from your subjects.','prof.subjNone':'No subjects yet. Add them on the Subjects page.','prof.subjMax':'Choose up to 12 subjects.','prof.goalLbl':'Study goal','prof.goalPh':'For example: finish chapter 5 before the mid-term','prof.interests':'Interests','prof.infoTitle':'About','prof.gEdu':'Education','prof.gStudy':'Study','prof.gPers':'Personal'});
+Object.assign(I18N.bn,{'hm.sToday':'আজ পড়েছেন','prof.basicSec':'মূল তথ্য','prof.basicHint':'আপনার নাম ও সংক্ষিপ্ত পরিচিতি।','prof.photoSec':'ছবি ও কভার','prof.photoHint':'প্রোফাইল কার্ডে দেখানো হয়।','prof.eduSec':'শিক্ষা','prof.eduHint':'কোথায় ও কোন স্তরে পড়ছেন।','prof.studySec':'পড়ার পছন্দ','prof.studyHint':'আপনার পড়ার পরিকল্পনাকে আরও উপযোগী করে।','prof.contactSec':'যোগাযোগ ও ব্যক্তিগত','prof.contactHint':'সবই ঐচ্ছিক। নিচের গোপনীয়তা অংশে দেখানোর বিষয় বাছুন।','prof.privSec':'গোপনীয়তা','prof.visHint':'যে তথ্য চালু করবেন শুধু সেগুলোই প্রোফাইলে দেখাবে।','prof.fullName':'পুরো নাম','prof.bioLbl':'সংক্ষিপ্ত পরিচিতি','prof.notSet':'লেখা নেই','prof.level':'পড়ার স্তর','prof.lv_school':'মাধ্যমিক (এসএসসি)','prof.lv_college':'উচ্চ মাধ্যমিক (এইচএসসি)','prof.lv_uni':'বিশ্ববিদ্যালয়','prof.lv_post':'স্নাতকোত্তর','prof.lv_adm':'ভর্তি প্রস্তুতি','prof.lv_self':'স্বশিক্ষার্থী','prof.lv_other':'অন্যান্য','prof.instLbl':'প্রতিষ্ঠান','prof.field':'বিভাগ বা গ্রুপ','prof.fieldPh':'যেমন: বিজ্ঞান, বাণিজ্য, মানবিক','prof.year':'শ্রেণি বা বর্ষ','prof.yearPh':'যেমন: একাদশ শ্রেণি, ২য় বর্ষ','prof.time':'পছন্দের পড়ার সময়','prof.tm_early':'ভোরে','prof.tm_morn':'সকালে','prof.tm_aft':'দুপুরে','prof.tm_eve':'সন্ধ্যায়','prof.tm_night':'রাতে','prof.tm_vary':'সময় বদলায়','prof.tgtLbl':'দৈনিক লক্ষ্য','prof.tgtVal':'{h} ঘণ্টা, সেটিংসে ঠিক করা','prof.subjects':'মূল বিষয়সমূহ','prof.subjHint':'আপনার বিষয়গুলো থেকে সর্বোচ্চ ১২টি বাছুন।','prof.subjNone':'এখনো কোনো বিষয় নেই। বিষয় পাতায় যোগ করুন।','prof.subjMax':'সর্বোচ্চ ১২টি বিষয় বাছা যায়।','prof.goalLbl':'শেখার লক্ষ্য','prof.goalPh':'যেমন: মধ্যপর্বের আগে পঞ্চম অধ্যায় শেষ করা','prof.interests':'আগ্রহ','prof.infoTitle':'পরিচিতি','prof.gEdu':'শিক্ষা','prof.gStudy':'পড়াশোনা','prof.gPers':'ব্যক্তিগত'});
+
+$('editBio').addEventListener('input', countFields);
+$('eGoal').addEventListener('input', countFields);
+$('eSubjects').addEventListener('change', e => { const l = e.target.closest('label'); if(l) l.classList.toggle('on', e.target.checked); });
+$('pfTgtLink').onclick = () => { go('settings'); setCat('study'); $('tgtIn').focus(); };
+const _openEdit = openEdit;
+openEdit = function(on){ _openEdit(on); if(on) profSnap = profFormSnap(); if(on) requestAnimationFrame(() => $('editForm').scrollIntoView({behavior: matchMedia('(prefers-reduced-motion:reduce)').matches ? 'auto' : 'smooth', block:'start'})); };
+Object.assign(I18N.en,{'prof.unsaved':'You have unsaved changes. Discard them?','prof.discard':'Discard changes'});
+Object.assign(I18N.bn,{'prof.unsaved':'সংরক্ষণ না করা পরিবর্তন আছে। এগুলো বাদ দেবেন?','prof.discard':'পরিবর্তন বাদ দিন'});
+Object.assign(I18N.en,{'prof.statsBtn':'View stats','prof.editTitle':'Edit profile'});
+Object.assign(I18N.bn,{'prof.statsBtn':'পরিসংখ্যান দেখুন','prof.editTitle':'প্রোফাইল সম্পাদনা'});
+$('peClose').onclick = () => $('editCancel').click();
+$('pStatsBtn').onclick = () => $('pIns').click();
+Object.assign(I18N.en,{'prof.tabOv':'Overview','prof.tabAbout':'About','prof.introSec':'Basic information','prof.persSec':'Personal information','prof.visPub':'Public','prof.visOnly':'Private'});
+Object.assign(I18N.bn,{'prof.tabOv':'ওভারভিউ','prof.tabAbout':'সম্পর্কে','prof.introSec':'পরিচিতি','prof.persSec':'ব্যক্তিগত তথ্য','prof.visPub':'সর্বজনীন','prof.visOnly':'শুধু আমি'});
+function setPTab(t){ document.querySelectorAll('#profView [data-pt]').forEach(e => { e.hidden = e.dataset.pt !== t; }); document.querySelectorAll('#profView .pf-tabs button').forEach(b => { const on = b.dataset.tab === t; b.classList.toggle('on', on); b.setAttribute('aria-selected', String(on)); }); }
+document.querySelectorAll('#profView .pf-tabs button').forEach(b => { b.onclick = () => setPTab(b.dataset.tab); });
+function syncEdPreview(){ $('avatarEd').innerHTML = $('avatar').innerHTML; const a = $('pCoverImg'), b = $('coverEdImg'); if(!a.hidden) b.src = a.src; b.hidden = a.hidden; $('coverEd').classList.toggle('has', !a.hidden); }
+const _pa2 = paintAvatar; paintAvatar = function(el, name, pic){ _pa2(el, name, pic); if(el && el.id === 'avatar') syncEdPreview(); };
+const _pc2 = paintCover; paintCover = function(src){ _pc2(src); syncEdPreview(); };
+const _oe3 = openEdit; openEdit = function(on){ _oe3(on); if(on) syncEdPreview(); };
+setPTab('o');
+Object.assign(I18N.en,{'prof.picT':'Profile picture','prof.coverT':'Cover photo','prof.viewPic':'View profile picture','prof.changePic':'Change profile picture','prof.viewCover':'View cover photo','prof.changeCover':'Change cover photo','prof.hobbySec':'Hobbies','prof.detAdd':'Add details'});
+Object.assign(I18N.bn,{'prof.picT':'প্রোফাইল ছবি','prof.coverT':'কভার ছবি','prof.viewPic':'প্রোফাইল ছবি দেখুন','prof.changePic':'প্রোফাইল ছবি পরিবর্তন করুন','prof.viewCover':'কভার ছবি দেখুন','prof.changeCover':'কভার ছবি পরিবর্তন করুন','prof.hobbySec':'শখ','prof.detAdd':'তথ্য যোগ করুন'});
+function renderProfInfo(){
+  const box = $('pInfo'); if(!box) return;
+  const p = profInfo(), I = p.info, V = p.vis;
+  const on = k => V[k] && (Array.isArray(I[k]) ? I[k].length > 0 : !!I[k]);
+  const T = k => k==='time' ? tr('prof.tm_'+I.time) : k==='gender' ? tr(GENK[I.gender]) : I[k];
+  const row = (ic, val, cap) => `<div class="pd-row"><span class="pd-ic">${pdSvg(ic)}</span><div class="pd-tx"><b>${esc(val)}</b>${cap?`<small>${esc(cap)}</small>`:''}</div></div>`;
+  const sec = (t, body) => body ? `<section class="pd-sec"><header class="pd-h"><h3>${esc(tr(t))}</h3><button type="button" class="pd-edit" data-edit aria-label="${esc(tr('prof.edit'))}">${pdSvg(PDI.pen)}</button></header>${body}</section>` : '';
+  const cls = n => n ? tr('pi.classN', {n: bnNum(n)}) : '';
+  const age = ageFrom(I.dob), dobTxt = fmtDob(I.dob), addr = addrFormat(I);
+  const pers = [
+    on('gender') && row(PDI.gen, T('gender')),
+    V.dob && dobTxt && row(PDI.cake, age !== null ? `${dobTxt} · ${tr('pi.ageN', {n: bnNum(age)})}` : dobTxt, tr('pi.dob')),
+    on('phone') && row(PDI.phone, I.phone, tr('pi.phone')),
+    on('email') && row(PDI.mail, I.email, tr('prof.email'))
+  ].filter(Boolean).join('');
+  const addrHtml = V.address && addr ? row(PDI.pin, addr) : '';
+  const edu = [
+    on('school') && row(PDI.bldg, I.school, [tr('pi.schoolSec'), cls(I.schoolClass)].filter(Boolean).join(' · ')),
+    on('college') && row(PDI.bldg, I.college, [tr('pi.collegeSec'), cls(I.collegeClass)].filter(Boolean).join(' · ')),
+    on('uni') && row(PDI.cap, I.uni, [tr('pi.uniSec'), I.field, I.year].filter(Boolean).join(' · '))
+  ].filter(Boolean).join('');
+  const hob = on('hobby') ? I.hobby.split(/[,،·]/).map(x => x.trim()).filter(Boolean).join(' · ') : '';
+  const hobRow = hob ? row(PDI.hobby, hob) : '';
+  const stu = [on('time') && row(PDI.clk, T('time')), on('subjects') && row(PDI.book, I.subjects.join(' · '), tr('prof.subjects')), on('goal') && row(PDI.flag, I.goal, tr('prof.goalLbl'))].filter(Boolean).join('');
+  const html = sec('prof.persSec', pers) + sec('pi.addrSec', addrHtml) + sec('prof.eduSec', edu) + sec('prof.hobbySec', hobRow) + sec('prof.studySec', stu);
+  box.innerHTML = html || `<div class="pd-empty"><p>${esc(tr('prof.detNone'))}</p><button type="button" class="pf-go" data-edit>${esc(tr('prof.detAdd'))}</button></div>`;
+}
+$('pInfo').addEventListener('click', e => { if(e.target.closest('[data-edit]')) openEdit(true); });
+
+function closePhotoSheet(){ $('pSheet').hidden = true; }
+let shKind = 'pic';
+function openPhotoSheet(kind){
+  shKind = kind; const isPic = kind === 'pic', has = isPic ? !!prof.pic : !!prof.cover;
+  $('pshT').textContent = tr(isPic ? 'prof.picT' : 'prof.coverT');
+  $('pshView').textContent = tr(isPic ? 'prof.viewPic' : 'prof.viewCover'); $('pshView').disabled = !has;
+  $('pshChange').textContent = tr(isPic ? 'prof.changePic' : 'prof.changeCover');
+  $('pSheet').hidden = false;
+}
+$('pshView').onclick = () => { closePhotoSheet(); const src = shKind === 'pic' ? prof.pic : prof.cover; if(!src) return; $('pviewImg').src = src; $('pViewer').hidden = false; };
+$('pshChange').onclick = () => { closePhotoSheet(); if(shKind === 'pic'){ $('picIn').click(); return; } openEdit(true); $('coverBtn').click(); };
+$('pshCancel').onclick = closePhotoSheet;
+$('pSheet').addEventListener('click', e => { if(e.target.classList.contains('psh-bg')) closePhotoSheet(); });
+$('pviewX').onclick = () => { $('pViewer').hidden = true; };
+$('pViewer').addEventListener('click', e => { if(e.target.id !== 'pviewImg') $('pViewer').hidden = true; });
+document.addEventListener('keydown', e => { if(e.key === 'Escape'){ closePhotoSheet(); $('pViewer').hidden = true; } });
+$('avatar').onclick = () => openPhotoSheet('pic');
+$('pAvCam').onclick = () => $('picIn').click();
+$('pCoverBtn').onclick = () => openPhotoSheet('cover');
+/* Photos: a 720 px square avatar and a 1000x400 cover, each stored as compressed JPEG within a size budget */
+function imgFromFile(file){ return new Promise((res,rej) => { if(!file || !/^image\//.test(file.type)) return rej(); const r = new FileReader(); r.onerror = rej; r.onload = () => { const im = new Image(); im.onerror = rej; im.onload = () => res(im); im.src = r.result; }; r.readAsDataURL(file); }); }
+function jpegOut(c, max){ let q = .9, d = c.toDataURL('image/jpeg', q); while(d.length > max && q > .6){ q = +(q - .05).toFixed(2); d = c.toDataURL('image/jpeg', q); } return d; }
+function sharpCtx(c){ const g = c.getContext('2d'); g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high'; return g; }
+
+function readCover(file){ return new Promise((res,rej) => { if(!file || !/^image\//.test(file.type)) return rej();
+  const r = new FileReader(); r.onerror = rej; r.onload = () => { const im = new Image(); im.onerror = rej; im.onload = () => {
+    const draw = W => { const H = Math.round(W * 0.4), c = document.createElement('canvas'); c.width = W; c.height = H;
+      const sc = Math.max(W/im.width, H/im.height), dw = im.width*sc, dh = im.height*sc;
+      sharpCtx(c).drawImage(im, (W-dw)/2, (H-dh)/2, dw, dh); return c; };
+    let W = 1000, data = jpegOut(draw(W), 150000);
+    while(data.length > 150000 && W > 500){ W = Math.round(W * 0.8); data = jpegOut(draw(W), 150000); }
+    res(data); }; im.src = r.result; };
+  r.readAsDataURL(file); }); }
+Object.assign(I18N.en,{'about.f1':'Bangla and English','about.f2':'Light and dark themes','about.version':'Version','about.platform':'Works in','about.platformV':'Any modern browser','about.connect':'Connect'});
+Object.assign(I18N.bn,{'about.f1':'বাংলা ও ইংরেজি','about.f2':'লাইট ও ডার্ক থিম','about.version':'সংস্করণ','about.platform':'কাজ করে','about.platformV':'যেকোনো আধুনিক ব্রাউজারে','about.connect':'যুক্ত হোন'});
+/* App version shown in About. Change it here when you release a new version. */
+const APP_VERSION = '1.0';
+const SN_COL = {Facebook:'#1877F2', Instagram:'#E1306C', YouTube:'#FF0000', LinkedIn:'#0A66C2', GitHub:'#24292F', X:'#111111', WhatsApp:'#25D366', Website:'var(--acc)'};
+function renderAboutSocial(){
+  const box = $('soc'); if(!box) return;
+  box.innerHTML = SOCIALS.map(([n, u]) => {
+    const st = `--sc:${SN_COL[n] || 'var(--acc)'}`, ini = esc(n.charAt(0)), name = esc(n);
+    return u ? `<a class="ab-sn" style="${st}" href="${esc(u)}" target="_blank" rel="noopener noreferrer"><span class="ab-sni">${ini}</span><span>${name}</span></a>`
+             : `<span class="ab-sn is-off" style="${st}" title="${name}"><span class="ab-sni">${ini}</span><span>${name}</span></span>`;
+  }).join('');
+}
+renderAboutSocial();
+$('abVer').textContent = APP_VERSION;
+/* ===== Profile: photo editor with a size preview, new labels, and wiring for the address fields ===== */
+const PHOTO_PX = 720, PHOTO_MAX = 180000;   /* 720 px square; at most about 135 KB of JPEG text */
+let pePic = null;
+function peRect(){ const im = pePic, w = im.naturalWidth || im.width, h = im.naturalHeight || im.height;
+  const z = +$('pepZoom').value, side = Math.min(w, h) / z, px = +$('pepPanX').value / 100, py = +$('pepPanY').value / 100;
+  return { sx: (w - side) / 2 * (1 + px), sy: (h - side) / 2 * (1 + py), side }; }
+function peDraw(c, S){ const r = peRect(); c.width = c.height = S; sharpCtx(c).drawImage(pePic, r.sx, r.sy, r.side, r.side, 0, 0, S, S); return c; }
+function paintPep(){ if(!pePic) return; peDraw($('pepCv'), 440); peDraw($('pepS'), 80); peDraw($('pepM'), 144); peDraw($('pepL'), 224); }
+function openPhotoEditor(){ $('pepZoom').value = 1; $('pepPanX').value = 0; $('pepPanY').value = 0; $('pepErr').textContent = ''; $('peP').hidden = false; paintPep(); }
+function closePhotoEditor(){ $('peP').hidden = true; pePic = null; }
+$('pepSave').onclick = () => { if(!pePic) return;
+  let S = PHOTO_PX, data = jpegOut(peDraw(document.createElement('canvas'), S), PHOTO_MAX);
+  while(data.length > PHOTO_MAX && S > 320){ S = Math.round(S * 0.8); data = jpegOut(peDraw(document.createElement('canvas'), S), PHOTO_MAX); }
+  if(!saveProfile(profName, data, undefined, undefined)){ $('pepErr').textContent = tr('v.storage'); return; }
+  pendingPic = undefined; closePhotoEditor(); renderProfile(); toast(tr('pi.picSaved')); };
+$('pepCancel').onclick = closePhotoEditor;
+['pepZoom','pepPanX','pepPanY'].forEach(id => $(id).addEventListener('input', paintPep));
+document.addEventListener('keydown', e => { if(e.key === 'Escape' && !$('peP').hidden) closePhotoEditor(); });
+(function(){ const d = new Date(); $('eDob').max = d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()); })();
+$('eCountry').onchange = () => { fillDivSel(''); fillDistSel('', ''); $('eDivTxt').value = ''; $('eDistTxt').value = ''; syncAddrVis(); };
+$('eDiv').onchange = () => { fillDistSel($('eDiv').value, ''); paintAddrOut(); };
+$('eDist').onchange = paintAddrOut;
+['eCountryTxt','eDivTxt','eDistTxt','eVillage'].forEach(id => $(id).addEventListener('input', paintAddrOut));
+fillDivSel(''); fillDistSel('', ''); syncAddrVis();
+Object.assign(I18N.en,{'pi.phone':'Phone number','pi.dob':'Date of birth','pi.ageN':'Age {n}','pi.addrSec':'Address','pi.country':'Country','pi.pickCountry':'Choose a country','pi.countryOther':'Other','pi.division':'Division','pi.district':'District','pi.pickDiv':'Choose division','pi.pickDist':'Choose district','pi.village':'Street address','pi.addrShown':'Shown on your profile:','pi.schoolSec':'School','pi.collegeSec':'College','pi.uniSec':'Graduation','pi.schoolName':'School name','pi.collegeName':'College name','pi.uniName':'University name','pi.class':'Class','pi.classN':'Class {n}','pi.subject':'Subject','pi.yearSem':'Year or semester','pi.dobErr':'Enter a valid date of birth.','pi.phoneErr':'Use 6 to 20 characters: digits, spaces, + and - only.','pi.pepTitle':'Profile picture','pi.pepZoom':'Zoom','pi.pepLR':'Move left or right','pi.pepUD':'Move up or down','pi.pepSizes':'How it looks on your profile','pi.sizeS':'Small','pi.sizeM':'Medium','pi.sizeL':'Large','pi.pepSave':'Save photo','pi.pepCancel':'Cancel','pi.picSaved':'Profile picture saved.'});
+Object.assign(I18N.bn,{'pi.phone':'ফোন নম্বর','pi.dob':'জন্ম তারিখ','pi.ageN':'বয়স {n} বছর','pi.addrSec':'বর্তমান ঠিকানা','pi.country':'দেশ','pi.pickCountry':'দেশ বাছুন','pi.countryOther':'অন্যান্য','pi.division':'বিভাগ','pi.district':'জেলা','pi.pickDiv':'বিভাগ বাছুন','pi.pickDist':'জেলা বাছুন','pi.village':'গ্রাম, রাস্তা বা বাড়ি','pi.addrShown':'প্রোফাইলে যেভাবে দেখাবে:','pi.schoolSec':'স্কুল','pi.collegeSec':'কলেজ','pi.uniSec':'গ্রাজুয়েশন','pi.schoolName':'স্কুলের নাম','pi.collegeName':'কলেজের নাম','pi.uniName':'বিশ্ববিদ্যালয়ের নাম','pi.class':'শ্রেণি','pi.classN':'শ্রেণি {n}','pi.subject':'বিষয়','pi.yearSem':'বর্ষ বা সেমিস্টার','pi.dobErr':'সঠিক জন্ম তারিখ লিখুন।','pi.phoneErr':'৬ থেকে ২০ অক্ষর, শুধু সংখ্যা, স্পেস, + ও - ব্যবহার করুন।','pi.pepTitle':'প্রোফাইল ছবি','pi.pepZoom':'জুম','pi.pepLR':'বাঁয়ে বা ডানে সরান','pi.pepUD':'উপরে বা নিচে সরান','pi.pepSizes':'প্রোফাইলে যেভাবে দেখাবে','pi.sizeS':'ছোট','pi.sizeM':'মাঝারি','pi.sizeL':'বড়','pi.pepSave':'ছবি সংরক্ষণ করুন','pi.pepCancel':'বাতিল','pi.picSaved':'প্রোফাইল ছবি সংরক্ষিত হয়েছে।'});
+/* Wording for cloud accounts; accounts made before cloud sync are still stored only in this browser */
+Object.assign(I18N.en,{});
+Object.assign(I18N.bn,{});
+/* All dictionaries now exist: re-apply static labels and render the profile once (the original startup ran earlier) */
+applyStatic();
+renderProfile();
+}

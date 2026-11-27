@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="bn" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="theme-color" content="#4b4fc2">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<script src="js/head.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link id="fontLink" rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,400..600&display=swap">
+<title>Revision · Study Time Tracker</title>
+<link rel="stylesheet" href="css/styles.css">
+
+<!-- Firebase (compat SDK): Google sign-in -->
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<script src="js/config.js"></script>
+</head>
+<body data-start="revision">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs><linearGradient id="gBarGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0"/><stop offset="1"/></linearGradient><linearGradient id="gRing" x1="0" y1="0" x2="1" y2="1"><stop offset="0"/><stop offset="1"/></linearGradient></defs></svg>
+<a class="skip-link" href="#main" data-i="a.skip">Skip to content</a>
+<header class="top">
+  <button type="button" class="icon menuopen" id="drawerOpen" aria-haspopup="dialog" aria-controls="drawer" aria-expanded="false" data-ia="aria-label=more.menu" aria-label="Menu"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  <div class="brand"><span class="mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 19V9"/><path d="M12 19V5"/><path d="M19 19v-7"/></svg></span><h1 id="hdrTitle">Study Time Tracker</h1></div>
+</header>
+
+<div id="banner" role="alert" hidden></div>
+<div id="syncBanner" class="sync-banner" role="status" hidden><span id="syncBannerTxt"></span> <button type="button" class="linkb" id="syncRetry"></button></div>
+<nav class="nav" data-ia="aria-label=nav.main">
+  <div class="nav-brand"><span class="mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 19V9"/><path d="M12 19V5"/><path d="M19 19v-7"/></svg></span><b>Study Time Tracker</b><button type="button" class="navcol" id="navCol" data-ia="aria-label=nav.collapse" aria-pressed="false"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg></button></div>
+  <div class="nav-g" data-i="nav.gMain">Main</div>
+  <button type="button" data-v="home"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11l8-7 8 7"/><path d="M6 10v9h12v-9"/><path d="M10 19v-5h4v5"/></svg><span data-i="nav.home">Home</span></button><button type="button" data-v="tasks" class="dsk"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 01-2 2H6a2 2 0 01-2-2V7a2 2 0 012-2h9"/></svg><span data-i="nav.tasks">Tasks</span></button><button type="button" data-v="focus" class="dsk"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2"/><path d="M9.5 3h5"/></svg><span data-i="nav.focus">Focus</span></button><button type="button" data-v="notes"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5"/><path d="M9 13h7M9 17h7"/></svg><span data-i="nav.notes">Notes</span></button>
+  <div class="nav-g" data-i="nav.gStudy">Study</div>
+  <button type="button" data-v="subjects" class="dsk"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5a2 2 0 012-2h13v16H6a2 2 0 00-2 2z"/><path d="M4 19a2 2 0 012-2h13"/><path d="M9 7h6"/></svg><span data-i="nav.subjects">Subjects</span></button>
+  <div class="nav-g" data-i="nav.gInsights">Insights</div>
+  <button type="button" data-v="insights" class="dsk"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 20V11"/><path d="M12 20V5"/><path d="M19 20v-6"/></svg><span data-i="nav.insights">Insights</span></button><button type="button" data-v="history"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h12M8 12h12M8 18h12"/><path d="M4 6h.01M4 12h.01M4 18h.01"/></svg><span data-i="nav.history">History</span></button>
+    
+    <button type="button" data-v="menu" class="dsk"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg><span data-i="more.menu">Menu</span></button>
+  <div class="nav-g" data-i="nav.gPref">Preferences</div>
+  <button type="button" data-v="profile"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4.5-6 8-6s7 2 8 6"/></svg><span data-i="nav.profile">Profile</span></button><button type="button" data-v="settings" class="dsk"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/></svg><span data-i="nav.settings">Settings</span></button>
+  
+</nav>
+<div class="dr-scrim" id="drawerScrim" aria-hidden="true"></div>
+<aside class="drawer" id="drawer" role="dialog" aria-modal="true" data-ia="aria-label=more.menu" inert>
+  <div class="dr-head"><span class="mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 19V9"/><path d="M12 19V5"/><path d="M19 19v-7"/></svg></span><span class="dr-title" data-i="app.title">Study Time Tracker</span><button type="button" class="dr-x" id="drawerClose" data-ia="aria-label=drawer.close" aria-label="Close menu"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+  <a class="dr-prof" href="profile.html" data-go="profile"><span class="dr-av" id="drAv" aria-hidden="true"></span><span class="dr-pt"><b id="drName"></b><small data-i="menu.seeProfile">See your profile</small></span></a>
+  <nav class="dr-scroll" data-ia="aria-label=nav.main"><div class="dr-g" data-i="nav.gMain">Main</div><a class="dr-item" href="index.html" data-go="home"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11l8-7 8 7"/><path d="M6 10v9h12v-9"/><path d="M10 19v-5h4v5"/></svg><span data-i="nav.home">Home</span></a><a class="dr-item" href="tasks.html" data-go="tasks"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 01-2 2H6a2 2 0 01-2-2V7a2 2 0 012-2h9"/></svg><span data-i="nav.tasks">Tasks</span></a><a class="dr-item" href="focus.html" data-go="focus"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2"/><path d="M9.5 3h5"/></svg><span data-i="nav.focus">Focus</span></a><a class="dr-item" href="notes.html" data-go="notes"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5"/><path d="M9 13h7M9 17h7"/></svg><span data-i="nav.notes">Notes</span></a><div class="dr-g" data-i="nav.gStudy">Study</div><a class="dr-item" href="planner.html" data-go="planner"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l2.5 2"/></svg><span data-i="nav.planner">Study planner</span></a><a class="dr-item" href="routine.html" data-go="routine"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5h14v15H5z"/><path d="M5 10h14M9 3v4M15 3v4"/></svg><span data-i="nav.routine">Routine</span></a>
+<a class="dr-item" href="calendar.html" data-go="calendar"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5h14v15H5z"/><path d="M5 10h14M9 3v4M15 3v4"/></svg><span data-i="nav.calendar">Calendar</span></a><a class="dr-item" href="library.html" data-go="library"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5a2 2 0 012-2h13v16H6a2 2 0 00-2 2z"/><path d="M4 19a2 2 0 012-2h13"/></svg><span data-i="nav.library">Study library</span></a><a class="dr-item" href="subjects.html" data-go="subjects"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5a2 2 0 012-2h13v16H6a2 2 0 00-2 2z"/><path d="M4 19a2 2 0 012-2h13"/><path d="M9 7h6"/></svg><span data-i="nav.subjects">Subjects</span></a>
+<a class="dr-item" href="routine.html" data-go="routine"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5a2 2 0 012-2h13v16H6a2 2 0 00-2 2z"/><path d="M4 19a2 2 0 012-2h13"/><path d="M9 7h6"/></svg><span data-i="nav.routine">Routine</span></a><a class="dr-item" href="exams.html" data-go="exams"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-5 9 5-9 5z"/><path d="M7 11.5V16c0 1.2 2.2 2.5 5 2.5s5-1.3 5-2.5v-4.5"/></svg><span data-i="nav.exams">Exams</span></a><div class="dr-g" data-i="nav.gInsights">Insights</div><a class="dr-item" href="history.html" data-go="history"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h12M8 12h12M8 18h12"/><path d="M4 6h.01M4 12h.01M4 18h.01"/></svg><span data-i="nav.history">History</span></a><a class="dr-item" href="insights.html" data-go="insights"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 20V11"/><path d="M12 20V5"/><path d="M19 20v-6"/></svg><span data-i="nav.insights">Insights</span></a><a class="dr-item" href="notifications.html" data-go="notifs"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 16V11a6 6 0 0112 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 004 0"/></svg><span data-i="nav.notifs">Notifications</span><b class="dr-badge" id="drBadge" hidden></b></a><div class="dr-g" data-i="nav.gPref">Preferences</div><a class="dr-item" href="settings.html" data-go="settings"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/></svg><span data-i="nav.settings">Settings</span></a></nav>
+  <div class="dr-foot"><button type="button" class="dr-item dr-out" id="drLogout"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 4H5v16h5"/><path d="M15 8l4 4-4 4"/><path d="M19 12H9"/></svg><span data-i="acct.logout">Log out</span></button></div>
+</aside>
+<main id="main" tabindex="-1">
+<div id="v-home" class="view cols home" data-view>
+<div class="hm-top span2">
+  <div class="hm-main">
+  <h2 class="hm-hi" id="greet"></h2>
+  <div class="hm-meta">
+    <span class="hm-pill"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg><span id="tLabel" data-i="home.today">Today</span><span id="tDate"></span></span>
+    <span class="hm-pill hm-pill-acc"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5"/></svg><span id="gbTarget"></span></span>
+  </div>
+  </div>
+  <button type="button" class="hm-bell" id="hmBell" data-go="notifs" aria-label="Notifications" title="Notifications"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M18 16v-5a6 6 0 10-12 0v5l-2 2h16z"/><path d="M10 20a2 2 0 004 0"/></svg><span class="hm-badge" id="hmBellN" hidden></span></button>
+</div>
+<section class="card addt span2" id="addCard" aria-labelledby="addTitle">
+  <div class="addt-head">
+    <h2 id="addTitle" data-i="form.title">Add study time</h2>
+    <div class="tabs" role="tablist" aria-label="Add study time">
+      <button type="button" role="tab" id="tabTimer" class="on" aria-selected="true" aria-controls="atTimer" data-i="hm.tabTimer">Timer</button>
+      <button type="button" role="tab" id="tabManual" aria-selected="false" aria-controls="atManual" tabindex="-1" data-i="hm.tabManual">Manual</button>
+    </div>
+  </div>
+  <div id="atTimer" role="tabpanel" aria-labelledby="tabTimer">
+    <div class="as-stage" id="liveCard" data-state="idle">
+      <div class="as-top" role="status" aria-live="polite"><span class="as-dot" aria-hidden="true"></span><span id="lsStatus">Ready when you are</span></div>
+      <div class="as-clock" id="lsClock" role="timer" data-ia="aria-label=ls.clockLbl">00:00:00</div>
+      <p class="as-now" id="lsSubNow"></p>
+      <div class="as-prog">
+        <span class="as-proglbl" id="tProg"></span>
+        <div class="track as-track" role="progressbar" data-ia="aria-label=home.progressLabel" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="fill" id="tFill"></div></div>
+      </div>
+    </div>
+    <div class="as-ctrl">
+      <div class="as-field"><label for="lsSub" data-i="ls.subject">Subject</label><select id="lsSub"></select></div>
+      <div class="as-field" id="lsNewWrap" hidden><label for="lsNewSub" data-i="ls.newLbl">New subject name</label><input id="lsNewSub" type="text" maxlength="30" autocomplete="off"></div>
+      <div class="err" id="lsErr" role="alert"></div>
+      <div class="as-btns">
+        <button type="button" class="as-main" id="lsMain">Start studying</button>
+        <div class="as-extra" id="lsExtra" hidden>
+          <button type="button" class="as-sec" id="lsFinish" data-i="ls.finish">Finish</button>
+          <button type="button" class="as-ghost" id="lsReset" data-i="ls.reset">Reset</button>
+        </div>
+      </div>
+      <p class="as-hint" id="lsHint"></p>
+    </div>
+  </div>
+  <div id="atManual" role="tabpanel" aria-labelledby="tabManual" hidden>
+    <section class="logcard" id="logCard" aria-labelledby="formTitle">
+  <h2 id="formTitle" data-i="form.title">Study time যোগ করুন</h2>
+  <label for="dateIn" data-i="form.date">তারিখ</label>
+  <input type="date" id="dateIn">
+  <div class="row" style="margin-top:12px">
+    <div><label for="hIn" data-i="form.hours">ঘণ্টা</label><input id="hIn" type="number" inputmode="numeric" min="0" max="24"></div>
+    <div><label for="mIn" data-i="form.minutes">মিনিট (00–59)</label><input id="mIn" type="number" inputmode="numeric" min="0" max="59"></div>
+  </div>
+  <details class="opt" id="opt"><summary data-i="form.optional">Subject ও Note (ঐচ্ছিক)</summary><div>
+    <div class="row">
+      <div><label for="subIn" data-i="form.subject">Subject</label><select id="subIn"></select></div>
+      <div><label for="newSub" data-i="form.newSubject">নতুন Subject</label><input type="text" id="newSub" maxlength="30"></div>
+    </div>
+    <div><label for="noteIn" data-i="form.note">Note</label><input type="text" id="noteIn" maxlength="140"></div>
+  </div></details>
+  <div class="err" id="err" role="alert"></div>
+  <div class="row"><button type="button" class="primary" id="saveBtn" data-i="form.save">Save</button><button type="button" id="cancelBtn" style="display:none" data-i="form.cancel">Cancel</button></div>
+</section>
+  </div>
+</section>
+<section class="card dayplan" id="dayPlanTop" aria-labelledby="dpTitle"></section>
+<section class="card qa-card"><h2 data-i="qa.title">Quick actions</h2><div class="qa">
+  <button type="button" class="qa-b" id="startFocus"><i><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2"/><path d="M9.5 3h5"/></svg></i><span><b data-i="qa.pomo">Start Pomodoro</b><small data-i="qa.pomoD">Timed focus rounds with breaks</small></span></button>
+  <button type="button" class="qa-b" data-qa="task"><i><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 01-2 2H6a2 2 0 01-2-2V7a2 2 0 012-2h9"/></svg></i><span><b data-i="qa.task">Add task</b><small data-i="qa.taskD">Plan what comes next</small></span></button>
+  <button type="button" class="qa-b" data-qa="schedule"><i><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg></i><span><b data-i="qa.sched">View schedule</b><small data-i="qa.schedD">Open the study planner</small></span></button>
+  <button type="button" class="qa-b" data-qa="note"><i><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5"/><path d="M9 13h7M9 17h7"/></svg></i><span><b data-i="qa.note">Add note</b><small data-i="qa.noteD">Write something down</small></span></button>
+  <button type="button" class="qa-b" data-act="log"><i><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></i><span><b data-i="qa.log">Log study time</b><small data-i="qa.logD">Add time manually</small></span></button>
+  
+</div></section>
+<section class="card hw" aria-labelledby="wTitle">
+  <div class="sechead"><h2 id="wTitle" data-i="hm.weekTitle">This week</h2><button type="button" class="linkb" id="hwInsights" data-i="qa.insights">View insights</button></div>
+  <div class="hw-top"><span data-i="week.total">Total</span><b id="wTotal"></b><span id="wTgt"></span></div>
+  <div id="week"></div>
+</section>
+<section class="card span2 cont" id="contCard" hidden><div><small class="small" id="contSt"></small><b id="contSub"></b></div><button type="button" class="primary" id="contGo" data-i="cont.resume">Continue</button></section>
+<section class="card span2 empty" id="homeEmpty" hidden><b data-i="hm.emptyT">Your study journey starts here.</b><p class="small" data-i="hm.emptyB"></p></section>
+
+
+<section class="card hg" id="goalCard" aria-labelledby="tLabel2">
+  <div class="sechead">
+    <div class="hg-title"><h2 id="tLabel2" data-i="home.focusTitle">Daily goal</h2><span class="chip" id="tStreak"></span></div>
+    <button type="button" class="linkb" id="hgChange" data-i="hm.changeGoal">Change goal</button>
+  </div>
+  <div class="hg-body">
+    <div class="hg-ringwrap">
+      <svg class="hring hg-ring" viewBox="0 0 64 64" aria-hidden="true"><circle class="hr-b" cx="32" cy="32" r="26"/><circle class="hr-f" id="hRing" cx="32" cy="32" r="26"/></svg>
+      <div class="hg-center"><b id="tPct">0%</b><small data-i="hm.ringLbl">of daily goal</small></div>
+    </div>
+    <div class="hg-facts">
+      <div class="hg-fact"><span data-i="hm.sToday">Studied today</span><b id="tTime">0</b></div>
+      <div class="hg-fact"><span data-i="home.dailyTarget">Daily target</span><b id="tTgt"></b></div>
+      <div class="hg-fact"><span data-i="home.remaining">Remaining</span><b id="tRem"></b></div>
+      <div class="hg-fact"><span data-i="hm.sessLbl">Sessions today</span><b id="gcSess">0</b></div>
+    </div>
+  </div>
+  <p class="home-note" id="homeNote"></p>
+</section>
+<section class="card" aria-labelledby="hglT">
+  <div class="sechead"><h2 id="hglT" data-i="hm.goalsTitle">Goals and achievements</h2></div>
+  <div class="hgl-item"><div class="hgl-top"><span data-i="hm.gDaily">Daily goal</span><b id="gDailyV"></b></div><div class="track"><div class="fill" id="gDailyBar"></div></div></div>
+  <div class="hgl-item"><div class="hgl-top"><span data-i="hm.gWeekly">Weekly goal</span><b id="gWeekV"></b></div><div class="track"><div class="fill" id="gWeekBar"></div></div></div>
+  <div class="hgl-item"><div class="hgl-top"><span data-i="hm.gStreak">Streak</span><b id="gStreakV"></b></div></div>
+  <div class="hgl-ach"><div class="hgl-achhd"><span data-i="hm.achTitle">Achievements</span><small id="hAchCount"></small></div><div class="hgl-chips" id="hAch"></div></div>
+</section>
+<section class="card" id="homeTasks"><div class="sechead"><h2 data-i="home.tasks">Today's tasks</h2><button type="button" class="primary sm" id="htAdd" data-i="task.add">Add task</button></div><div id="htList"></div><button type="button" class="linkb" id="htAll" data-i="home.tAll">All tasks</button></section>
+<section class="card" id="homePlans" aria-labelledby="hpT"><div class="sechead"><h2 id="hpT" data-i="pl.homeTitle">Study plan</h2><button type="button" class="primary sm" id="hpAdd" data-i="pl.add">Add plan</button></div><div id="hpList"></div><button type="button" class="linkb" id="hpAll" data-i="pl.open">Open planner</button></section><section class="card" id="homeExams" aria-labelledby="hxT"><div class="sechead"><h2 id="hxT" data-i="exam.homeTitle">Upcoming exams</h2><button type="button" class="primary sm" id="hxAdd" data-i="exam.add">Add exam</button></div><div id="hxList"></div><button type="button" class="linkb" id="hxAll" data-i="exam.all">All exams</button></section>
+<section class="card" aria-labelledby="hrT">
+  <div class="sechead"><h2 id="hrT" data-i="hm.recentTitle">Recent activity</h2><button type="button" class="linkb" id="hrAll" data-i="prof.viewAll">View all</button></div>
+  <div id="recList"></div>
+</section>
+<div hidden aria-hidden="true" id="legacyStats">
+<section class="span2 qs">
+  <div class="qc" hidden><i><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c1 4 5 5.5 5 10a5 5 0 01-10 0c0-2 1-3 2-4 .3 1.4 1 2 2 2-1-3-.5-5 1-8z"/></svg></i><span data-i="qs.streak">Current Streak</span><b id="q1"></b><small id="q1s"></small></div>
+  <div class="qc" hidden><i><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5"/></svg></i><span data-i="qs.goal">Goal Progress</span><b id="q2"></b><small id="q2s"></small></div>
+  <div class="qc"><i><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5a2 2 0 012-2h11v15H7a2 2 0 00-2 2z"/><path d="M5 20a2 2 0 002 1h11"/></svg></i><span data-i="qs.total">Total Study</span><b id="q3"></b><small id="q3s"></small></div>
+  <div class="qc"><i><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg></i><span data-i="qs.days">Study Days</span><b id="q4"></b><small id="q4s"></small></div>
+</section>
+</div>
+</div>
+<div id="v-focus" class="view narrow" data-view hidden><section class="card timer" aria-labelledby="tTitle" data-phase="focus">
+  <h2 id="tTitle" data-i="timer.title">Focus Timer</h2>
+  <div class="seg" id="tModes" role="group" data-ia="aria-label=timer.mode"><button type="button" class="on" data-m="25" aria-pressed="true">25 / 5</button><button type="button" data-m="50" aria-pressed="false">50 / 10</button><button type="button" data-m="c" aria-pressed="false" data-i="timer.custom">Custom</button></div>
+  <div class="row" id="cRow" hidden>
+    <div><label for="cF" data-i="timer.focusLbl">Focus (1–180 min)</label><input id="cF" type="number" inputmode="numeric" min="1" max="180" value="25"></div>
+    <div><label for="cB" data-i="timer.breakLbl">Break (1–60 min)</label><input id="cB" type="number" inputmode="numeric" min="1" max="60" value="5"></div>
+  </div>
+  <div class="err" id="tErr" role="alert"></div>
+  <div class="ringwrap" id="tRingWrap" role="progressbar" data-ia="aria-label=timer.progLbl" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+    <svg class="ring" viewBox="0 0 120 120" aria-hidden="true"><circle class="rb" cx="60" cy="60" r="52"/><circle class="rf" id="tRing" cx="60" cy="60" r="52"/></svg>
+    <div class="rc"><div id="tPhase">Focus</div><div class="clock" id="tClock" role="timer" data-ia="aria-label=timer.clockLbl">25:00</div></div>
+  </div>
+  <div class="tmsg" id="tMsg" role="status" aria-live="polite"></div>
+  <div class="row"><button type="button" class="primary" id="tStart">Start</button><button type="button" id="tReset" data-i="timer.reset">Reset</button></div>
+  <button type="button" class="skip" id="tSkip" hidden data-i="timer.skip">Skip break</button>
+  <div class="tsub"><label for="tSub" data-i="timer.subject">Subject for the next focus session</label><select id="tSub"></select></div>
+  <div class="prefs">
+    <label class="chk"><input type="checkbox" id="pSound"><span data-i="timer.sound">Sound when a session ends</span></label>
+    <label class="chk"><input type="checkbox" id="pNotify"><span data-i="timer.notify">Browser notification</span></label>
+    <div class="small" id="pHint"></div>
+  </div>
+</section>
+</div>
+<div id="v-insights" class="view cols" data-view hidden><section class="card span2" aria-labelledby="gTitle">
+  <h2 id="gTitle" data-i="trend.title">Study Trend</h2>
+  <div class="seg" id="gRange" role="group" data-ia="aria-label=trend.range"><button type="button" data-r="7" aria-pressed="false">7D</button><button type="button" data-r="15" aria-pressed="false">15D</button><button type="button" class="on" data-r="30" aria-pressed="true">30D</button><button type="button" data-r="m" aria-pressed="false">1M</button><button type="button" data-r="150" aria-pressed="false">5M</button><button type="button" data-r="365" aria-pressed="false">1Y</button></div>
+  <div class="gnav"><button type="button" class="icon" id="gPrev" data-ia="aria-label=trend.prev">‹</button><div class="gper" id="gPeriod"></div><button type="button" class="icon" id="gNext" data-ia="aria-label=trend.next">›</button></div>
+  <div id="gWeek"></div>
+  <div class="empty" id="gEmpty" hidden></div>
+  <div id="gBody">
+    <div id="gChart" tabindex="0" role="group" data-ia="aria-label=trend.chartLbl"></div>
+    <div class="legend" id="gLegend"></div>
+    <div class="ginfo" id="gInfo" role="status" aria-live="polite"></div>
+    <p class="small" id="gText"></p>
+    <div class="tiles" id="gSum"></div>
+    <p class="small" data-i="trend.avgNote">Average = total ÷ days since your first record. Days without a record count as 0 h, a target applies only to those days.</p>
+    <h3 class="sub" data-i="trend.bySubject">By subject (this period)</h3><div id="gSubs"></div>
+    <details class="opt"><summary data-i="trend.table">View as data table</summary><div id="gTbl"></div></details>
+  </div>
+</section>
+<section class="card">
+  <h2 id="mTitle" data-i="mon.heading">Monthly Summary</h2>
+  <div class="stat"><span data-i="mon.total">এই মাসে মোট</span><b id="mTotal"></b></div>
+  <div class="stat"><span data-i="mon.avg">গড় (পড়া দিনগুলো)</span><b id="mAvg"></b></div>
+  <div class="stat"><span data-i="mon.best">সবচেয়ে বেশি</span><b id="mBest"></b></div>
+  <div class="stat"><span data-i="mon.active">Active days</span><b id="mDays"></b></div>
+  <div class="stat"><span data-i="mon.reach">Target reached</span><b id="mGoal"></b></div>
+  <div class="tile" style="margin-top:8px"><span data-i="mon.prev">Previous month comparison</span><b id="mCmp" style="font-size:.95rem"></b></div>
+</section>
+<section class="card"><h2 data-i="sub.title">Subject Breakdown · all time</h2><div id="subs"></div></section>
+<section class="card" aria-labelledby="hTitle">
+  <h2 id="hTitle" data-i="heat.title">Study Activity</h2>
+  <div class="heatwrap"><span></span><div class="hmon" id="hmon" aria-hidden="true" style="grid-template-columns:repeat(18,1fr)"></div>
+    <div class="hdays" aria-hidden="true"><span></span><span data-wd="1"></span><span></span><span data-wd="3"></span><span></span><span data-wd="5"></span><span></span></div>
+    <div class="heat" id="heat" tabindex="0" role="application" data-ia="aria-label=heat.label"></div></div>
+  <div class="legend"><span><i class="hc"></i><em data-i="heat.legNo">No record</em></span><span><i class="hc today"></i><em data-i="heat.legToday">Today</em></span><span><i class="hc z"></i><em data-i="heat.legZero">Recorded 0</em></span><span><i class="hc l1"></i>&lt;25%</span><span><i class="hc l2"></i>&lt;60%</span><span><i class="hc l3"></i>&lt;100%</span><span><i class="hc l4"></i><em data-i="heat.legTarget">≥100% of daily target</em></span></div>
+  <p class="small" id="heatSum"></p>
+  <label class="heatpick"><span data-i="heat.pick">Pick a day</span><input type="date" id="heatDate"></label>
+  <div class="ginfo" id="heatInfo" role="status" aria-live="polite"></div>
+</section>
+<section class="card" aria-labelledby="calTitle">
+  <div class="calhd">
+    <button type="button" class="icon" id="calPrev">&lsaquo;</button>
+    <div class="calm"><h2 id="calTitle"></h2><button type="button" class="link" id="calToday"></button></div>
+    <button type="button" class="icon" id="calNext">&rsaquo;</button>
+  </div>
+  <div class="calwd" id="calWd" aria-hidden="true"></div>
+  <div class="calgrid" id="calGrid" role="group"></div>
+  <div class="calsum" id="calSum"></div>
+  <div class="ginfo cal-info" id="calInfo" role="status" aria-live="polite"></div>
+</section>
+<section class="card">
+  <details class="advd"><summary class="h2s" data-i="adv.title">Advanced Statistics</summary>
+  <div class="tiles">
+    <div class="tile"><span id="l1" data-i="adv.totalStudy">মোট পড়াশোনা</span><b id="total"></b></div>
+    <div class="tile"><span id="l2" data-i="adv.avgStudy">গড় পড়াশোনা</span><b id="avg"></b></div>
+  </div>
+  <details><summary data-i="adv.more">আরও দেখুন</summary><div id="adv"></div></details></details>
+</section>
+<section class="card span2"><h2 data-i="ach.title">Achievements</h2><div class="ach" id="ach"></div></section>
+</div>
+<div id="v-history" class="view narrow" data-view hidden><section class="card">
+  <div class="hh"><h2 data-i="hist.title">History</h2><button type="button" id="imgAll" data-i="hist.img">Save as image</button></div>
+  <div class="filters">
+    <input id="fq" type="search" data-ia="placeholder=hist.search;aria-label=hist.searchLbl">
+    <select id="fm" data-ia="aria-label=hist.monthLbl"></select><select id="fs" data-ia="aria-label=hist.subjLbl"></select>
+    <select id="fo" data-ia="aria-label=hist.sortLbl"><option value="desc" data-i="hist.newest">Newest first</option><option value="asc" data-i="hist.oldest">Oldest first</option></select>
+  </div>
+  <div id="hist"></div>
+</section>
+</div>
+<div id="v-menu" class="view narrow" data-view hidden>
+<header class="pagehead"><button type="button" class="back" id="menuBack"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="M11 6l-6 6 6 6"/></svg><span data-i="set.back">Back</span></button><h2 data-i="more.menu">Menu</h2></header>
+<a class="mprof" href="profile.html" data-go="profile"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4.5-6 8-6s7 2 8 6"/></svg><span class="mtx"><b data-i="nav.profile">Profile</b><small data-i="menu.seeProfile">See your profile</small></span></a>
+<section class="mgroup"><h3 class="mgh" data-i="nav.gStudy">Study</h3><div class="mgrid"><a class="mcard" href="planner.html" data-go="planner"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l2.5 2"/></svg><span data-i="nav.planner">Study planner</span></a><a class="mcard" href="routine.html" data-go="routine"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5h14v15H5z"/><path d="M5 10h14M9 3v4M15 3v4"/></svg><span data-i="nav.routine">Routine</span></a>
+<a class="mcard" href="calendar.html" data-go="calendar"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5h14v15H5z"/><path d="M5 10h14M9 3v4M15 3v4"/></svg><span data-i="nav.calendar">Calendar</span></a><a class="mcard" href="library.html" data-go="library"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5a2 2 0 012-2h13v16H6a2 2 0 00-2 2z"/><path d="M4 19a2 2 0 012-2h13"/></svg><span data-i="nav.library">Study library</span></a><a class="mcard" href="subjects.html" data-go="subjects"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5a2 2 0 012-2h13v16H6a2 2 0 00-2 2z"/><path d="M4 19a2 2 0 012-2h13"/><path d="M9 7h6"/></svg><span data-i="nav.subjects">Subjects</span></a><a class="mcard" href="exams.html" data-go="exams"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5h14v15H5z"/><path d="M5 10h14M9 3v4M15 3v4"/></svg><span data-i="nav.exams">Exams</span></a></div></section><section class="mgroup"><h3 class="mgh" data-i="more.grpProd">Productivity</h3><div class="mgrid"><a class="mcard" href="tasks.html" data-go="tasks"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 01-2 2H6a2 2 0 01-2-2V7a2 2 0 012-2h9"/></svg><span data-i="nav.tasks">Tasks</span></a><a class="mcard" href="notes.html" data-go="notes"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5"/><path d="M9 13h7M9 17h7"/></svg><span data-i="nav.notes">Notes</span></a><a class="mcard" href="focus.html" data-go="focus"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2"/><path d="M9.5 3h5"/></svg><span data-i="nav.focus">Focus</span></a></div></section><section class="mgroup"><h3 class="mgh" data-i="more.grpProg">Progress &amp; personal</h3><div class="mgrid"><a class="mcard" href="insights.html" data-go="insights"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 20V11"/><path d="M12 20V5"/><path d="M19 20v-6"/></svg><span data-i="nav.insights">Insights</span></a><a class="mcard" href="history.html" data-go="history"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h12M8 12h12M8 18h12"/><path d="M4 6h.01M4 12h.01M4 18h.01"/></svg><span data-i="nav.history">History</span></a><a class="mcard" href="slots.html" data-go="slots"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg><span data-i="nav.slots">Time of day</span></a><a class="mcard" href="qbank.html" data-go="qbank"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 015 0c0 2-2.5 2-2.5 4"/><path d="M12 17h.01"/></svg><span data-i="nav.qbank">Question bank</span></a><a class="mcard" href="journal.html" data-go="journal"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h11a2 2 0 012 2v16H8a2 2 0 01-2-2z"/><path d="M6 19a2 2 0 012-2h11"/><path d="M10 8h5M10 11h5"/></svg><span data-i="nav.journal">Journal</span></a><a class="mcard" href="habits.html" data-go="habits"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l4 4 10-10"/></svg><span data-i="nav.habits">Habits</span></a><a class="mcard" href="revision.html" data-go="revision"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 109-9"/><path d="M3 4v5h5"/><path d="M12 7v5l3 2"/></svg><span data-i="nav.revision">Revision</span></a><button type="button" class="mcard" id="menuNotifs" data-go="notifs"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 16V11a6 6 0 0112 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 004 0"/></svg><span data-i="nav.notifs">Notifications</span></button></div></section><div class="mbottom"><a class="mrow" href="settings.html" data-go="settings"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/></svg><span data-i="nav.settings">Settings</span></a><button type="button" class="mrow mout" id="menuLogout"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 4H5v16h5"/><path d="M15 8l4 4-4 4"/><path d="M19 12H9"/></svg><span data-i="acct.logout">Log out</span></button></div>
+</div>
+<div id="v-profile" class="view narrow pf" data-view hidden>
+<section id="profSetup" class="card setup" hidden><h2 data-i="prof.create">Create your profile</h2><p class="small" data-i="prof.hint">Enter your name to get started.</p>
+  <form id="setupForm" novalidate><label for="setupName" data-i="prof.name">Name</label><input id="setupName" type="text" maxlength="40" autocomplete="name"><div class="err" id="setupErr" role="alert"></div><button type="submit" class="primary wide" data-i="prof.continue">Continue</button></form></section>
+<section id="profView" class="profile" hidden>
+  <section class="card pf-hero">
+    <div class="pf-cover" id="pCover">
+      <img id="pCoverImg" alt="" hidden>
+      <button type="button" class="pf-gear" id="ppSettings" aria-label="Settings"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg></button>
+      <button type="button" class="pf-cover-btn" id="pCoverBtn"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg><span id="pCoverTxt" data-i="prof.coverBtn">Add cover photo</span></button>
+    </div>
+    <div class="pf-idrow">
+      <div class="pf-avwrap"><div class="avatar pf-av" id="avatar" aria-hidden="true"></div><button type="button" class="pf-camdot" id="pAvCam" aria-label="Change profile photo"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></button></div>
+      <b class="pf-name" id="profNameOut"></b>
+      <p class="pf-bio" id="profBioOut" hidden></p>
+    </div>
+    <div class="pf-acts">
+      <button type="button" class="pf-edit" id="profEdit" data-i="prof.edit">Edit profile</button>
+      <button type="button" class="pf-edit" id="pStatsBtn" data-i="prof.statsBtn">View stats</button>
+    </div>
+    <nav class="pf-tabs" aria-label="Profile sections"><button type="button" class="on" data-tab="o" data-i="prof.tabOv">Overview</button><button type="button" data-tab="a" data-i="prof.tabAbout">About</button></nav>
+  </section>
+
+<form id="editForm" class="fbe" hidden novalidate>
+  <header class="fbe-top"><button type="button" class="fbe-back" id="peClose" aria-label="Back"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button><h2 data-i="prof.editTitle">Edit profile</h2><button type="submit" class="fbe-save" data-i="prof.save">Save</button></header>
+  <div class="fbe-cover" id="coverEd"><img id="coverEdImg" alt="" hidden><button type="button" class="pf-cover-btn" id="coverBtn"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg><span data-i="prof.coverChoose">Choose cover photo</span></button>
+    <div class="fbe-avwrap"><div class="avatar fbe-av" id="avatarEd" aria-hidden="true"></div><button type="button" class="fbe-camdot" id="picBtn" aria-label="Choose photo"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></button></div>
+  </div>
+  <div class="fbe-sheet">
+    <div class="fbe-media"><button type="button" id="picRm" hidden data-i="prof.rmphoto">Remove photo</button><button type="button" id="coverRm" hidden data-i="prof.coverRm">Remove cover</button></div>
+    <input type="file" id="picIn" accept="image/*" hidden><input type="file" id="coverIn" accept="image/*" hidden>
+    <details class="fbe-sec" open><summary><span data-i="prof.introSec">Basic information</span><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg></summary><div class="fbe-row"><span class="fbe-ico"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v11H9l-5 4z"/></svg></span><div class="fbe-f"><label class="fbe-lbl" for="editBio" data-i="prof.bioLbl">Bio</label><textarea id="editBio" maxlength="160" rows="2"></textarea><small class="pf-count" id="bioCount">0/160</small></div><span class="fbe-pen"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l4-1 11-11-3-3L5 16z"/></svg></span></div><div class="fbe-row"><span class="fbe-ico"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V4M5 4h11l-2 4 2 4H5"/></svg></span><div class="fbe-f"><label class="fbe-lbl" for="eGoal" data-i="prof.goalLbl">Study goal</label><textarea id="eGoal" maxlength="140" rows="2"></textarea><small class="pf-count" id="goalCount">0/140</small><label class="fbe-vis"><input type="checkbox" id="v_goal"><span class="on"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c3 3 3 13 0 16M12 4c-3 3-3 13 0 16"/></svg><span data-i="prof.visPub">Public</span></span><span class="off"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg><span data-i="prof.visOnly">Private</span></span></label></div><span class="fbe-pen"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l4-1 11-11-3-3L5 16z"/></svg></span></div></details>
+    <details class="fbe-sec" open><summary><span data-i="prof.persSec">Personal information</span><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg></summary><div class="fbe-row"><span class="fbe-ico"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4.5-6 8-6s7 2 8 6"/></svg></span><div class="fbe-f"><label class="fbe-lbl" for="editName" data-i="prof.fullName">Full name</label><input id="editName" type="text" maxlength="40" autocomplete="name"></div><span class="fbe-pen"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l4-1 11-11-3-3L5 16z"/></svg></span></div><div class="fbe-row"><span class="fbe-ico"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg></span><div class="fbe-f"><label class="fbe-lbl" for="eDob" data-i="pi.dob">Date of birth</label><input id="eDob" type="date"><label class="fbe-vis"><input type="checkbox" id="v_dob"><span class="on"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c3 3 3 13 0 16M12 4c-3 3-3 13 0 16"/></svg><span data-i="prof.visPub">Public</span></span><span class="off"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg><span data-i="prof.visOnly">Private</span></span></label></div><span class="fbe-pen"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l4-1 11-11-3-3L5 16z"/></svg></span></div><div class="fbe-row"><span class="fbe-ico"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="14" r="5"/><path d="M14 10l6-6M15 4h5v5"/></svg></span><div class="fbe-f"><label class="fbe-lbl" for="eGender" data-i="prof.gender">Gender</label><select id="eGender"><option value="" data-i="prof.genNone">Not set</option><option value="male" data-i="prof.genM">Male</option><option value="female" data-i="prof.genF">Female</option><option value="other" data-i="prof.genO">Other</option><option value="x" data-i="prof.genX">Prefer not to say</option></select><label class="fbe-vis"><input type="checkbox" id="v_gender"><span class="on"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c3 3 3 13 0 16M12 4c-3 3-3 13 0 16"/></svg><span data-i="prof.visPub">Public</span></span><span class="off"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg><span data-i="prof.visOnly">Private</span></span></label></div><span class="fbe-pen"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l4-1 11-11-3-3L5 16z"/></svg></span></div><div class="fbe-row"><span class="fbe-ico"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/></svg></span><div class="fbe-f"><label class="fbe-lbl" for="ePhone" data-i="pi.phone">Phone number</label><input id="ePhone" type="tel" maxlength="20" autocomplete="tel"><label class="fbe-vis"><input type="checkbox" id="v_phone"><span class="on"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c3 3 3 13 0 16M12 4c-3 3-3 13 0 16"/></svg><span data-i="prof.visPub">Public</span></span><span class="off"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg><span data-i="prof.visOnly">Private</span></span></label></div><span class="fbe-pen"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l4-1 11-11-3-3L5 16z"/></svg></span></div><div class="fbe-row"><span class="fbe-ico"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg></span><div class="fbe-f"><label class="fbe-lbl" for="eEmail" data-i="prof.email">Email</label><input id="eEmail" type="email" maxlength="60" autocomplete="email"><label class="fbe-vis"><input type="checkbox" id="v_email"><span class="on"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c3 3 3 13 0 16M12 4c-3 3-3 13 0 16"/></svg><span data-i="prof.visPub">Public</span></span><span class="off"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg><span data-i="prof.visOnly">Private</span></span></label></div><span class="fbe-pen"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l4-1 11-11-3-3L5 16z"/></svg></span></div><div class="fbe-row"><span class="fbe-ico"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20s-7-4.5-7-10a4 4 0 0 1 7-2.5A4 4 0 0 1 19 10c0 5.5-7 10-7 10z"/></svg></span><div class="fbe-f"><label class="fbe-lbl" for="eHobby" data-i="prof.interests">Interests</label><input id="eHobby" type="text" maxlength="60"><label class="fbe-vis"><input type="checkbox" id="v_hobby"><span class="on"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c3 3 3 13 0 16M12 4c-3 3-3 13 0 16"/></svg><span data-i="prof.visPub">Public</span></span><span class="off"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg><span data-i="prof.visOnly">Private</span></span></label></div><span class="fbe-pen"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l4-1 11-11-3-3L5 16z"/></svg></span></div></details>
+<details class="fbe-sec" open><summary><span data-i="pi.addrSec">Address</span><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg></summary><div class="fbe-row"><span class="fbe-ico"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c3 3 3 13 0 16M12 4c-3 3-3 13 0 16"/></svg></span><div class="fbe-f"><label class="fbe-lbl" for="eCountry" data-i="pi.country">Country</label><select id="eCountry"><option value="" data-i="pi.pickCountry">Choose a country</option><option value="Australia">Australia</option><option value="Bahrain">Bahrain</option><option value="Bangladesh">Bangladesh</option><option value="Bhutan">Bhutan</option><option value="Canada">Canada</option><option value="China">China</option><option value="Germany">Germany</option><option value="India">India</option><option value="Indonesia">Indonesia</option><option value="Italy">Italy</option><option value="Japan">Japan</option><option value="Kuwait">Kuwait</option><option value="Malaysia">Malaysia</option><option value="Maldives">Maldives</option><option value="Myanmar">Myanmar</option><option value="Nepal">Nepal</option><option value="Netherlands">Netherlands</option><option value="Oman">Oman</option><option value="Pakistan">Pakistan</option><option value="Philippines">Philippines</option><option value="Qatar">Qatar</option><option value="Saudi Arabia">Saudi Arabia</option><option value="Singapore">Singapore</option><option value="South Africa">South Africa</option><option value="South Korea">South Korea</option><option value="Spain">Spain</option><option value="Sri Lanka">Sri Lanka</option><option value="Thailand">Thailand</option><option value="United Arab Emirates">United Arab Emirates</option><option value="United Kingdom">United Kingdom</option><option value="United States">United States</option><option value="Other" data-i="pi.countryOther">Other</option></select><input id="eCountryTxt" type="text" maxlength="60" hidden></div><span class="fbe-pen"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l4-1 11-11-3-3L5 16z"/></svg></span></div><div class="fbe-row"><span class="fbe-ico"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/></svg></span><div class="fbe-f"><label class="fbe-lbl" for="eDiv" data-i="pi.division">Division</label><select id="eDiv" hidden></select><input id="eDivTxt" type="text" maxlength="60" hidden></div><span class="fbe-pen"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l4-1 11-11-3-3L5 16z"/></svg></span></div><div class="fbe-row"><span class="fbe-ico"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/></svg></span><div class="fbe-f"><label class="fbe-lbl" for="eDist" data-i="pi.district">District</label><select id="eDist" hidden></select><input id="eDistTxt" type="text" maxlength="60" hidden></div><span class="fbe-pen"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l4-1 11-11-3-3L5 16z"/></svg></span></div><div class="fbe-row"><span class="fbe-ico"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-6-5.5-6-11a6 6 0 0 1 12 0c0 5.5-6 11-6 11z"/><circle cx="12" cy="10" r="2.2"/></svg></span><div class="fbe-f"><label class="fbe-lbl" for="eVillage" data-i="pi.village">Village, road or house</label><input id="eVillage" type="text" maxlength="120" autocomplete="street-address"><label class="fbe-vis"><input type="checkbox" id="v_address"><span class="on"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c3 3 3 13 0 16M12 4c-3 3-3 13 0 16"/></svg><span data-i="prof.visPub">Public</span></span><span class="off"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg><span data-i="prof.visOnly">Private</span></span></label></div><span class="fbe-pen"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l4-1 11-11-3-3L5 16z"/></svg></span></div><p class="pi-out" id="eAddrOut"></p></details>
+<details class="fbe-sec" open><summary><span data-i="prof.eduSec">Education</span><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg></summary><h3 class="sub" data-i="pi.schoolSec">School</h3><div class="fbe-row"><span class="fbe-ico"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16M6 20V10l6-5 6 5v10M10 20v-5h4v5"/></svg></span><div class="fbe-f"><label class="fbe-lbl" for="eSchool" data-i="pi.schoolName">School name</label><input id="eSchool" type="text" maxlength="80" autocomplete="organization"><label class="fbe-vis"><input type="checkbox" id="v_school"><span class="on"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c3 3 3 13 0 16M12 4c-3 3-3 13 0 16"/></svg><span data-i="prof.visPub">Public</span></span><span class="off"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg><span data-i="prof.visOnly">Private</span></span></label></div><span class="fbe-pen"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l4-1 11-11-3-3L5 16z"/></svg></span></div><div class="fbe-row"><span class="fbe-ico"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg></span><div class="fbe-f"><label class="fbe-lbl" for="eSchoolCls" data-i="pi.class">Class</label><select id="eSchoolCls"><option value="" data-i="prof.notSet">Not set</option><option value="1">Class 1</option><option value="2">Class 2</option><option value="3">Class 3</option><option value="4">Class 4</option><option value="5">Class 5</option><option value="6">Class 6</option><option value="7">Class 7</option><option value="8">Class 8</option><option value="9">Class 9</option><option value="10">Class 10</option></select></div><span class="fbe-pen"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l4-1 11-11-3-3L5 16z"/></svg></span></div><h3 class="sub" data-i="pi.collegeSec">College</h3><div class="fbe-row"><span class="fbe-ico"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16M6 20V10l6-5 6 5v10M10 20v-5h4v5"/></svg></span><div class="fbe-f"><label class="fbe-lbl" for="eCollege" data-i="pi.collegeName">College name</label><input id="eCollege" type="text" maxlength="80" autocomplete="organization"><label class="fbe-vis"><input type="checkbox" id="v_college"><span class="on"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c3 3 3 13 0 16M12 4c-3 3-3 13 0 16"/></svg><span data-i="prof.visPub">Public</span></span><span class="off"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg><span data-i="prof.visOnly">Private</span></span></label></div><span class="fbe-pen"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l4-1 11-11-3-3L5 16z"/></svg></span></div><div class="fbe-row"><span class="fbe-ico"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg></span><div class="fbe-f"><label class="fbe-lbl" for="eCollegeCls" data-i="pi.class">Class</label><select id="eCollegeCls"><option value="" data-i="prof.notSet">Not set</option><option value="11">Class 11</option><option value="12">Class 12</option></select></div><span class="fbe-pen"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l4-1 11-11-3-3L5 16z"/></svg></span></div><h3 class="sub" data-i="pi.uniSec">Graduation</h3><div class="fbe-row"><span class="fbe-ico"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-4 9 4-9 4z"/><path d="M7 11v4c2 2 8 2 10 0v-4"/></svg></span><div class="fbe-f"><label class="fbe-lbl" for="eUni" data-i="pi.uniName">University name</label><input id="eUni" type="text" maxlength="80" autocomplete="organization"><label class="fbe-vis"><input type="checkbox" id="v_uni"><span class="on"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c3 3 3 13 0 16M12 4c-3 3-3 13 0 16"/></svg><span data-i="prof.visPub">Public</span></span><span class="off"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg><span data-i="prof.visOnly">Private</span></span></label></div><span class="fbe-pen"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l4-1 11-11-3-3L5 16z"/></svg></span></div><div class="fbe-row"><span class="fbe-ico"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5a2 2 0 0 1 2-2h12v16H6a2 2 0 0 0-2 2z"/></svg></span><div class="fbe-f"><label class="fbe-lbl" for="eField" data-i="pi.subject">Subject</label><input id="eField" type="text" maxlength="60"></div><span class="fbe-pen"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l4-1 11-11-3-3L5 16z"/></svg></span></div><div class="fbe-row"><span class="fbe-ico"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg></span><div class="fbe-f"><label class="fbe-lbl" for="eYear" data-i="pi.yearSem">Year or semester</label><input id="eYear" type="text" maxlength="40"></div><span class="fbe-pen"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l4-1 11-11-3-3L5 16z"/></svg></span></div></details>
+<details class="fbe-sec" open><summary><span data-i="prof.studySec">Study</span><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg></summary><div class="fbe-row"><span class="fbe-ico"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg></span><div class="fbe-f"><label class="fbe-lbl" for="eTime" data-i="prof.time">Preferred study time</label><select id="eTime"><option value="" data-i="prof.notSet">Not set</option><option value="early" data-i="prof.tm_early">Early morning</option><option value="morn" data-i="prof.tm_morn">Morning</option><option value="aft" data-i="prof.tm_aft">Afternoon</option><option value="eve" data-i="prof.tm_eve">Evening</option><option value="night" data-i="prof.tm_night">Night</option><option value="vary" data-i="prof.tm_vary">It varies</option></select><label class="fbe-vis"><input type="checkbox" id="v_time"><span class="on"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c3 3 3 13 0 16M12 4c-3 3-3 13 0 16"/></svg><span data-i="prof.visPub">Public</span></span><span class="off"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg><span data-i="prof.visOnly">Private</span></span></label></div><span class="fbe-pen"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l4-1 11-11-3-3L5 16z"/></svg></span></div><div class="fbe-row"><span class="fbe-ico"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5"/></svg></span><div class="fbe-f"><span class="fbe-lbl" data-i="prof.tgtLbl">Daily target</span><div class="pf-target"><span class="pf-tgt-v" id="pfTgt"></span><button type="button" class="link" id="pfTgtLink" data-i="prof.change">Change</button></div></div><span class="fbe-pen"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l4-1 11-11-3-3L5 16z"/></svg></span></div><div class="fbe-row"><span class="fbe-ico"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5a2 2 0 0 1 2-2h12v16H6a2 2 0 0 0-2 2z"/></svg></span><div class="fbe-f"><span class="fbe-lbl" data-i="prof.subjects">Main subjects</span><div class="pf-chips" id="eSubjects"></div><p class="small" data-i="prof.subjHint">Choose up to 12 from your subjects.</p><label class="fbe-vis"><input type="checkbox" id="v_subjects"><span class="on"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c3 3 3 13 0 16M12 4c-3 3-3 13 0 16"/></svg><span data-i="prof.visPub">Public</span></span><span class="off"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg><span data-i="prof.visOnly">Private</span></span></label></div><span class="fbe-pen"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l4-1 11-11-3-3L5 16z"/></svg></span></div></details>
+    <p class="err" id="editErr" role="alert"></p>
+  </div>
+  <button type="button" id="editCancel" hidden>Cancel</button>
+</form>
+
+  <section class="card pf-info" id="pInfo" aria-label="About" data-pt="a"></section>
+
+  <section class="card pf-stats" aria-label="Study summary" data-pt="o">
+    <div class="pf-st"><b id="pStreak"></b><small data-i="prof.streak">Current streak</small></div>
+    <div class="pf-st"><b id="pGoal"></b><small data-i="prof.goal">Daily goal</small><button type="button" class="link" id="pGoalLink" data-i="prof.change">Change</button></div>
+    <div class="pf-st"><b id="pNotes"></b><small data-i="prof.notes">Notes</small></div>
+  </section>
+
+  <section class="card" aria-labelledby="pAchT" data-pt="o">
+    <div class="pf-sh"><h3 id="pAchT" data-i="prof.achTitle">Achievements</h3><small id="pAchCount"></small></div>
+    <div class="pf-ach" id="pAch"></div>
+  </section>
+
+  <section class="card" aria-labelledby="pRecT" data-pt="o">
+    <div class="pf-sh"><h3 id="pRecT" data-i="hm.recentTitle">Recent activity</h3><button type="button" class="link" id="pRecAll" data-i="prof.viewAll">View all</button></div>
+    <div id="pRecList"></div>
+  </section>
+
+  
+
+  <button type="button" class="pf-row-btn card" id="pIns" data-pt="o">
+    <span class="pf-ico"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 20V11M12 20V5M19 20v-6"/></svg></span>
+    <span><b data-i="prof.insTitle">View detailed stats</b><small data-i="prof.insSub">See your study insights and progress.</small></span>
+    <span class="pf-go"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
+  </button>
+
+  <button type="button" class="pf-row-btn card" id="pwSetBtn" hidden><span class="pf-ico"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg></span><span><b data-i="pw.openTitle">Set a login password</b><small data-i="pw.openSub">Also log in with your Gmail and a password.</small></span><span class="pf-go"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span></button>
+
+  <section class="card" id="pwCard" aria-labelledby="pwT" hidden>
+    <h3 id="pwT" data-i="pw.title">Set a login password</h3>
+    <p class="small" data-i="pw.info">Use this password with the same Gmail address. Your Google password is never asked for or stored.</p>
+    <form id="pwForm" novalidate>
+      <label class="pw-lbl"><span data-i="pw.newLbl">New password</span><input id="pwNew" type="password" maxlength="64" autocomplete="new-password"></label>
+      <label class="pw-lbl"><span data-i="pw.confLbl">Confirm password</span><input id="pwNew2" type="password" maxlength="64" autocomplete="new-password"></label>
+      <div class="pw-meter" aria-hidden="true"><i id="pwBar"></i></div>
+      <small id="pwHint" class="small" aria-live="polite"></small>
+      <p class="err" id="pwErr" role="alert"></p>
+      <div class="pw-acts">
+        <button type="button" id="pwEye" class="linkb" data-i="pw.show">Show</button>
+        <button type="button" id="pwCancel" class="linkb" data-i="pw.cancel">Cancel</button>
+        <button type="submit" id="pwSave" class="primary" data-i="pw.save">Save password</button>
+      </div>
+    </form>
+  </section>
+
+  <button type="button" class="logout" id="logoutBtn"><span data-i="acct.logout">Log out</span></button>
+  
+</section>
+</div>
+<div id="v-settings" class="view narrow" data-view hidden>
+<header class="pagehead"><button type="button" class="back" id="setBack"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="M11 6l-6 6 6 6"/></svg><span data-i="set.back">Back</span></button><h2 data-i="set.title">Settings</h2></header>
+<div class="set-dash" id="setDash">
+<p class="set-sub" data-i="set.sub">Manage your account, preferences and more.</p>
+<button type="button" class="set-prof" id="setProf"><span class="set-av" id="setAv" aria-hidden="true"></span><span class="set-pt"><b id="setPn"></b><small data-i="set.editProf">Edit profile</small></span><span class="set-go" data-i="set.editBtn">Edit</span></button>
+<button type="button" class="srow" data-open="profile"><span class="sgi"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4.5-6 8-6s7 2 8 6"/></svg></span><span class="srow-t"><b data-i="scat.profile">Profile and account</b><small data-i="scat.profileD">Your name, photo and personal details.</small></span><span class="srow-go"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span></button><button type="button" class="srow" data-open="appearance"><span class="sgi"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 100 18c1.1 0 1.8-.8 1.8-1.8 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-1 .8-1.8 1.8-1.8H17a4 4 0 004-4c0-4.4-4-8-9-8z"/><circle cx="7.5" cy="10.5" r="1"/><circle cx="12" cy="7.5" r="1"/><circle cx="16.5" cy="10.5" r="1"/></svg></span><span class="srow-t"><b data-i="scat.appearance">Appearance and themes</b><small data-i="scat.appearanceD">Light, dark and color themes, plus font.</small></span><span class="srow-go"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span></button><button type="button" class="srow" data-open="language"><span class="sgi"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c2.5 3 2.5 13 0 16M12 4c-2.5 3-2.5 13 0 16"/></svg></span><span class="srow-t"><b data-i="scat.language">Language</b><small data-i="scat.languageD">Bangla or English for the whole app.</small></span><span class="srow-go"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span></button><button type="button" class="srow" data-open="study"><span class="sgi"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2"/><path d="M9.5 3h5"/></svg></span><span class="srow-t"><b data-i="scat.study">Study and timer</b><small data-i="scat.studyD">Daily target and custom timer lengths.</small></span><span class="srow-go"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span></button><button type="button" class="srow" data-open="notif"><span class="sgi"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 16V11a6 6 0 0112 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 004 0"/></svg></span><span class="srow-t"><b data-i="scat.notif">Notifications</b><small data-i="scat.notifD">Study reminders and when they arrive.</small></span><span class="srow-go"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span></button><button type="button" class="srow" data-open="data"><span class="sgi"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18a4 4 0 010-8 5 5 0 019.6-1.3A4 4 0 0117 18z"/></svg></span><span class="srow-t"><b data-i="scat.data">Storage and data</b><small data-i="scat.dataD">Export, import and back up your records.</small></span><span class="srow-go"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span></button><button type="button" class="srow" data-open="privacy"><span class="sgi"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/></svg></span><span class="srow-t"><b data-i="scat.privacy">Privacy and security</b><small data-i="scat.privacyD">Where your data is kept and how to clear it.</small></span><span class="srow-go"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span></button><button type="button" class="srow" data-open="help"><span class="sgi"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 015 0c0 1.7-2.5 2-2.5 4"/><path d="M12 17h.01"/></svg></span><span class="srow-t"><b data-i="scat.help">Help and support</b><small data-i="scat.helpD">Answers to common questions.</small></span><span class="srow-go"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span></button><button type="button" class="srow" data-open="about"><span class="sgi"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg></span><span class="srow-t"><b data-i="scat.about">About</b><small data-i="scat.aboutD">What this app is and who made it.</small></span><span class="srow-go"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span></button>
+<button type="button" class="set-out" id="setLogout"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 4H5v16h5"/><path d="M15 8l4 4-4 4"/><path d="M19 12H9"/></svg><span data-i="acct.logout">Log out</span></button>
+</div>
+
+
+
+<section class="card" data-sec="appearance"><div class="grph"><span class="sgi"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 100 18c1.1 0 1.8-.8 1.8-1.8 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-1 .8-1.8 1.8-1.8H17a4 4 0 004-4c0-4.4-4-8-9-8z"/><circle cx="7.5" cy="10.5" r="1"/><circle cx="12" cy="7.5" r="1"/><circle cx="16.5" cy="10.5" r="1"/></svg></span><h3 class="grp" data-i="set.appearance">Appearance</h3></div>
+  <div id="themeSec" role="group" aria-labelledby="themeHd" style="margin-bottom:var(--s5)">
+    <div class="th-hd" id="themeHd" data-i="set.theme">Theme</div>
+    <div class="th-gl" id="thLblL">Light Themes</div><div class="tgrid" id="tgL"></div>
+    <div class="th-gl" id="thLblD">Dark Themes</div><div class="tgrid" id="tgD"></div>
+    <div class="th-gl" id="thLblA">Automatic</div><div class="tgrid" id="tgA"></div>
+  </div>
+  <div class="set-row">
+    
+    <div><label for="fontSel" data-i="set.font">Font</label><select id="fontSel"><option value="classic">Inter · Hind Siliguri</option><option value="soft">Manrope · Noto Sans Bengali</option><option value="serif">Serif · Noto Serif Bengali</option><option value="system">System</option></select></div>
+  </div>
+</section>
+<section class="card" data-sec="study"><div class="grph"><span class="sgi"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5a2 2 0 012-2h13v16H6a2 2 0 00-2 2z"/><path d="M4 19a2 2 0 012-2h13"/></svg></span><h3 class="grp" data-i="set.study">Study</h3></div>
+  <div class="set-row"><div><label for="tgtIn" data-i="set.target">Daily target (hours)</label><input id="tgtIn" type="number" inputmode="decimal" min="1" max="24" step="0.5"></div></div>
+  <div class="err" id="setErr"></div>
+</section>
+<section class="card" data-sec="study"><div class="grph"><span class="sgi"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2"/><path d="M9.5 3h5"/></svg></span><h3 class="grp" data-i="set.timerHd">Timer</h3></div>
+  <div class="set-row"><div><label for="setFocus" data-i="set.focusDef">Custom focus length (minutes)</label><input id="setFocus" type="number" inputmode="numeric" min="1" max="180" step="1"></div><div><label for="setBreak" data-i="set.breakDef">Custom break length (minutes)</label><input id="setBreak" type="number" inputmode="numeric" min="1" max="60" step="1"></div></div>
+  <p class="small" data-i="set.timerNote">Used by the Custom timer mode. The 25 and 50 minute modes stay fixed.</p>
+</section>
+<section class="card" data-sec="notif"><div class="grph"><span class="sgi"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 16V11a6 6 0 0112 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 004 0"/></svg></span><h3 class="grp" data-i="set.notif">Notifications and reminders</h3></div>
+  <label class="chk"><input type="checkbox" id="remOn"><span data-i="set.remOn">Turn on reminders</span><small data-i="set.remOnD">Turn reminders on or off. When off, the options below do not run.</small></label>
+  <label class="chk"><input type="checkbox" id="remTask"><span data-i="set.remTask">Task deadlines</span><small data-i="set.remTaskD">Get a reminder before a task deadline.</small></label>
+  <label class="chk"><input type="checkbox" id="remExam"><span data-i="set.remExam">Upcoming exams</span><small data-i="set.remExamD">Get a reminder before an exam, using the lead time below.</small></label>
+  <label class="chk"><input type="checkbox" id="remPlan"><span data-i="set.remPlan">Scheduled study sessions</span><small data-i="set.remPlanD">Get a reminder before a scheduled study session, using the time below.</small></label>
+  <label class="chk"><input type="checkbox" id="remGoal"><span data-i="set.remGoal">Daily study goal</span><small data-i="set.remGoalD">Get a reminder at the daily goal time set below.</small></label>
+  <label class="chk"><input type="checkbox" id="remRev"><span data-i="set.remRev">Revision reminders</span><small data-i="set.remRevD">Get a reminder when a revision is due.</small></label>
+  <label class="chk"><input type="checkbox" id="remBk"><span data-i="set.remBk">Backup reminders</span><small data-i="set.remBkD">Get a reminder to back up your data.</small></label>
+  <div class="set-row"><div><label for="remExamLead" data-i="set.examLead">Exam reminder, days before</label><input id="remExamLead" type="number" inputmode="numeric" min="1" max="14" step="1"></div><div><label for="remPlanLead" data-i="set.planLead">Session reminder, minutes before</label><select id="remPlanLead"><option value="5">5</option><option value="15">15</option><option value="30">30</option><option value="60">60</option></select></div><div><label for="remGoalT" data-i="set.goalTime">Daily goal reminder time</label><input id="remGoalT" type="time"></div>
+  <div><label for="studyRemT" data-i="set.studyRemT">Study reminder time</label><input id="studyRemT" type="time"></div></div>
+  <div class="perm"><p class="small" id="permTxt"></p><button type="button" id="permBtn" hidden data-i="set.permAsk">Allow browser notifications</button><button type="button" id="testNote" hidden data-i="set.testBtn">Send a test notification</button></div>
+  <p class="small" data-i="set.remNote">Reminders are checked only while this app is open.</p>
+</section>
+<section class="card" data-sec="data"><div class="grph"><span class="sgi"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18a4 4 0 010-8 5 5 0 019.6-1.3A4 4 0 0117 18z"/></svg></span><h3 class="grp" data-i="set.data">Data</h3></div>
+  <div class="set-row">
+    <button type="button" id="expBtn" data-i="set.export">Export Data</button>
+    <button type="button" id="impBtn" data-i="set.import">Import Data</button>
+    <button type="button" id="restoreBtn" hidden data-i="set.restore">Restore last backup</button>
+    
+    
+  </div>
+  <input type="file" id="file" accept="application/json,.json" hidden>
+  <p class="small" id="storeUse"></p>
+
+  <p class="small" id="lastExpTxt"></p>
+  <p class="small" id="recInfo"></p>
+</section>
+<section class="card" data-sec="language"><div class="grph"><span class="sgi"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c2.5 3 2.5 13 0 16M12 4c-2.5 3-2.5 13 0 16"/></svg></span><h3 class="grp" data-i="set.lang">Language</h3></div><div class="set-row"><div><label for="langSel" data-i="set.lang">Language</label><select id="langSel"><option value="bn" data-i="set.langBn">বাংলা</option><option value="en" data-i="set.langEn">English</option></select></div></div></section>
+<section class="card" data-sec="privacy"><div class="grph"><span class="sgi"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/></svg></span><h3 class="grp" data-i="scat.privacy">Privacy and security</h3></div><div class="set-row"><button type="button" class="danger" id="resetBtn" data-i="set.reset">Reset All Data</button><button type="button" id="resetPrefsBtn" data-i="prefs.reset">Reset preferences</button></div></section>
+<section class="card" data-sec="help"><div class="grph"><span class="sgi"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 015 0c0 1.7-2.5 2-2.5 4"/><path d="M12 17h.01"/></svg></span><h3 class="grp" data-i="scat.help">Help and support</h3></div><details class="faq"><summary data-i="faq.q1">How do I start tracking study time?</summary><p data-i="faq.a1">Open Focus and press start. When you stop the session, its time is saved to your study records.</p></details><details class="faq"><summary data-i="faq.q2">Why are my reminders not showing?</summary><p data-i="faq.a2">Reminders are checked only while this app is open. For browser notifications, allow them in your browser site settings. The Notifications section shows the current status.</p></details><details class="faq"><summary data-i="faq.q3">How do I back up my data?</summary><p data-i="faq.a3">Open Storage and data and choose Export data. To restore, choose Import data and pick the backup file.</p></details></section>
+<section class="card ab" data-sec="about" aria-labelledby="abT">
+  <div class="grph"><span class="sgi"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg></span><h3 class="grp" id="abT" data-i="scat.about">About</h3></div>
+  <div class="ab-hero">
+    <span class="ab-logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 19V9"/><path d="M12 19V5"/><path d="M19 19v-7"/></svg></span>
+    <div class="ab-hero-t"><b>Study Time Tracker</b><small data-i="about.desc">Track study time, plan sessions, keep notes and see your progress in one place.</small></div>
+  </div>
+  <div class="ab-chips">
+    <span class="ab-chip" data-i="about.f1">Bangla and English</span>
+    <span class="ab-chip" data-i="about.f2">Light and dark themes</span>
+    
+    
+  </div>
+  <dl class="ab-meta">
+    <div><dt data-i="about.version">Version</dt><dd id="abVer"></dd></div>
+    <div><dt data-i="about.platform">Works in</dt><dd data-i="about.platformV">Any modern browser</dd></div>
+  </dl>
+  <div class="ab-creator"><span class="ab-av" aria-hidden="true">MM</span><div><small data-i="foot.by">Designed &amp; Developed by</small><b>Md. Monirujjaman Miraj</b></div></div>
+  <p class="ab-soc-h" data-i="about.connect">Connect</p>
+  <div class="ab-soc" id="soc"></div>
+  <footer class="ab-foot"><div class="copy" id="copyLine"></div></footer>
+</section>
+
+
+
+</div>
+</main>
+<dialog id="dlg" aria-labelledby="dlgMsg"><form method="dialog"><p id="dlgMsg"></p>
+  <div class="row"><button type="submit" value="cancel" data-i="dlg.cancel">Cancel</button><button type="submit" value="ok" class="primary" id="dlgOk" data-i="dlg.ok">Confirm</button></div></form></dialog>
+<div id="v-subjects" class="view" data-view hidden></div>
+<div id="v-tasks" class="view" data-view hidden></div><div id="v-exams" class="view" data-view hidden></div><div id="v-planner" class="view" data-view hidden></div><div id="v-calendar" class="view" data-view hidden></div><div id="v-library" class="view" data-view hidden></div><div id="v-notifs" class="view" data-view hidden></div>
+<div id="v-revision" class="view" data-view hidden></div>
+<div id="v-habits" class="view" data-view hidden></div>
+<div id="v-journal" class="view" data-view hidden></div>
+<div id="v-qbank" class="view" data-view hidden></div>
+<div id="v-slots" class="view" data-view hidden></div>
+<div id="v-routine" class="view" data-view hidden></div>
+<div id="v-notes" class="view" data-view hidden><div id="nList"></div><div id="nEd" hidden></div></div>
+<dialog id="fdlg"><form id="fdF" novalidate><h2 id="fdT"></h2><div id="fdB"></div><div class="err" id="fdE" role="alert"></div><div class="row fdbtn"><button type="button" id="fdC"></button><button type="submit" class="primary" id="fdS"></button></div></form></dialog>
+
+<div id="pSheet" class="psh" hidden><div class="psh-bg"></div><div class="psh-box" role="dialog" aria-modal="true" aria-labelledby="pshT"><p class="psh-t" id="pshT"></p><button type="button" class="psh-btn" id="pshView"></button><button type="button" class="psh-btn" id="pshChange"></button><button type="button" class="psh-btn psh-cancel" id="pshCancel" data-i="prof.cancel">Cancel</button></div></div>
+<div id="pViewer" class="pview" hidden><button type="button" class="pview-x" id="pviewX" aria-label="Close"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button><img id="pviewImg" alt=""></div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<div id="undo" class="undo" role="status" hidden><span id="undoMsg"></span><button type="button" id="undoBtn" data-i="undo.btn">Undo</button></div>
+
+<div id="welcome" hidden>
+  <div id="wsync" hidden><span class="wsp" aria-hidden="true"></span><p id="wSyncTxt"></p></div>
+  <div id="termsBox" class="tbox" role="dialog" aria-modal="true" aria-labelledby="termsT" hidden>
+  <div class="tcard">
+    <div class="trow"><h2 id="termsT"></h2><button type="button" class="wlink" id="termsClose"></button></div>
+    <div class="tbody" data-lang="en"><h3>Terms &amp; Conditions</h3>
+<p class="draft">Draft. The app owner must review and complete this text before it is published. Items in [square brackets] must be filled in.</p>
+<ol>
+<li><b>About the app.</b> Study Time Tracker helps you plan and record your studies: study sessions, tasks, exams, notes, revision, habits and a study journal. The app is provided by [app owner name or organisation].</li>
+<li><b>Your account.</b> You can create an account with a username and password, or sign in with Google. Keep your password safe. You are responsible for activity on your account.</li>
+<li><b>Your data.</b> Study data is saved on your device. When you are signed in, it is also saved to a cloud database provided by Google Firebase, so your other devices can use it. We use your data only to run and sync the app. We do not sell your data.</li>
+<li><b>Notifications.</b> Reminders appear while the app is open. Background notifications, when turned on, are sent through a push service. You can turn any notification off in Settings or in your browser or phone settings.</li>
+<li><b>Backups.</b> You are responsible for your own backups. Use the export option in Settings regularly.</li>
+<li><b>Acceptable use.</b> Do not misuse the app, try to access another person's data, or interfere with the service.</li>
+<li><b>No guarantee.</b> The app is provided as it is. We work to keep it reliable, but we do not promise it will always be available or error-free. Your study results are your own responsibility.</li>
+<li><b>Deleting data.</b> You can delete your data from the app. Data kept on your device is removed when you clear this site's data in your browser. Cloud data is removed when you delete your account. [Describe the deletion process once it is built.]</li>
+<li><b>Changes.</b> We may update these terms. Continuing to use the app after an update means you accept the updated terms. Last updated: [date].</li>
+<li><b>Law and contact.</b> These terms are governed by the laws of [country]. For questions, contact [email address].</li>
+</ol></div>
+    <div class="tbody" data-lang="bn" hidden><h3>শর্তাবলি</h3>
+<p class="draft">খসড়া। প্রকাশের আগে অ্যাপের মালিককে এই লেখা যাচাই করে সম্পূর্ণ করতে হবে। [বন্ধনীর] তথ্য পূরণ করতে হবে।</p>
+<ol>
+<li><b>অ্যাপ সম্পর্কে।</b> স্টাডি টাইম ট্র্যাকার আপনাকে পড়াশোনা পরিকল্পনা ও রেকর্ড করতে সাহায্য করে: পড়ার সেশন, টাস্ক, পরীক্ষা, নোট, রিভিশন, অভ্যাস ও পড়ার জার্নাল। অ্যাপটি দিচ্ছেন [অ্যাপের মালিকের নাম বা প্রতিষ্ঠান]।</li>
+<li><b>আপনার অ্যাকাউন্ট।</b> ইউজারনেম ও পাসওয়ার্ড দিয়ে অ্যাকাউন্ট খুলতে পারেন, অথবা Google দিয়ে লগইন করতে পারেন। পাসওয়ার্ড নিরাপদ রাখুন। অ্যাকাউন্টের সব কার্যক্রমের দায়িত্ব আপনার।</li>
+<li><b>আপনার ডেটা।</b> পড়াশোনার ডেটা আপনার ডিভাইসে সংরক্ষিত হয়। লগইন থাকলে তা Google Firebase-এর ক্লাউড ডেটাবেসেও সংরক্ষিত হয়, যাতে আপনার অন্য ডিভাইসে ব্যবহার করা যায়। আমরা শুধু অ্যাপ চালাতে ও সিঙ্ক করতে ডেটা ব্যবহার করি। আমরা আপনার ডেটা বিক্রি করি না।</li>
+<li><b>নোটিফিকেশন।</b> অ্যাপ খোলা থাকলে রিমাইন্ডার দেখায়। ব্যাকগ্রাউন্ড নোটিফিকেশন চালু করলে তা একটি পুশ সেবার মাধ্যমে পাঠানো হয়। সেটিংস, অথবা ব্রাউজার বা ফোনের সেটিংস থেকে যেকোনো নোটিফিকেশন বন্ধ করতে পারেন।</li>
+<li><b>ব্যাকআপ।</b> নিজের ব্যাকআপের দায়িত্ব আপনার। সেটিংসের এক্সপোর্ট সুবিধা নিয়মিত ব্যবহার করুন।</li>
+<li><b>ব্যবহারের নিয়ম।</b> অ্যাপের অপব্যবহার, অন্য কারও ডেটায় প্রবেশের চেষ্টা, বা সেবায় বিঘ্ন ঘটানো থেকে বিরত থাকুন।</li>
+<li><b>কোনো নিশ্চয়তা নেই।</b> অ্যাপটি যেমন আছে তেমনই দেওয়া হয়েছে। নির্ভরযোগ্য রাখতে আমরা কাজ করি, তবে সব সময় চালু বা ত্রুটিমুক্ত থাকার নিশ্চয়তা দিই না। পড়াশোনার ফলাফলের দায়িত্ব আপনার নিজের।</li>
+<li><b>ডেটা মুছে ফেলা।</b> অ্যাপ থেকে আপনার ডেটা মুছতে পারেন। ব্রাউজারে এই সাইটের ডেটা মুছলে ডিভাইসের ডেটা চলে যায়। অ্যাকাউন্ট মুছলে ক্লাউডের ডেটা মুছে যায়। [মোছার প্রক্রিয়া তৈরি হলে এখানে লিখুন।]</li>
+<li><b>পরিবর্তন।</b> এই শর্তাবলি আমরা পরিবর্তন করতে পারি। পরিবর্তনের পর অ্যাপ ব্যবহার চালিয়ে গেলে হালনাগাদ শর্তাবলি মেনে নেওয়া হয়। সর্বশেষ হালনাগাদ: [তারিখ]।</li>
+<li><b>আইন ও যোগাযোগ।</b> এই শর্তাবলি [দেশের] আইন অনুযায়ী পরিচালিত হবে। প্রশ্নের জন্য যোগাযোগ করুন: [ইমেইল ঠিকানা]।</li>
+</ol></div>
+  </div>
+</div>
+<div id="bootShell" role="status" aria-live="polite" hidden>
+    <div class="bs-wrap">
+      <header class="bs-top"><span class="bs-brand"><span class="bs-skel bs-logo"></span><span class="bs-skel bs-name"></span></span><span class="bs-skel bs-pill"></span></header>
+      <div class="bs-grid" aria-hidden="true">
+        <div class="bs-card bs-hero"><span class="bs-skel bs-l1"></span><span class="bs-skel bs-l2"></span><span class="bs-skel bs-bar"></span></div>
+        <div class="bs-card bs-ring"><span class="bs-skel bs-circle"></span></div>
+        <div class="bs-card bs-stat"><span class="bs-skel bs-l1"></span><span class="bs-skel bs-l2"></span></div>
+        <div class="bs-card bs-stat"><span class="bs-skel bs-l1"></span><span class="bs-skel bs-l2"></span></div>
+        <div class="bs-card bs-stat"><span class="bs-skel bs-l1"></span><span class="bs-skel bs-l2"></span></div>
+        <div class="bs-card bs-list"><span class="bs-skel bs-row"></span><span class="bs-skel bs-row"></span><span class="bs-skel bs-row"></span></div>
+      </div>
+      <div class="bs-status" id="bsStatus"><span class="bs-spin" aria-hidden="true"></span><p id="bsMsg"></p></div>
+      <div class="bs-err" id="bsErr" hidden><p class="bs-et" id="bsErrT"></p><p class="bs-es" id="bsErrS"></p><div class="bs-acts" id="bsActs"></div></div>
+    </div>
+  </div>
+  <header class="wnav">
+    <div class="brand"><span class="mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 19V9"/><path d="M12 19V5"/><path d="M19 19v-7"/></svg></span><b id="brandName">Study Time Tracker</b></div>
+    <div class="wlang" role="group" aria-label="Language"><button type="button" id="langEn" aria-pressed="true">English</button><button type="button" id="langBn" aria-pressed="false">বাংলা</button></div>
+  </header>
+  <div class="wshell">
+    <section class="whero" aria-label="Study Time Tracker">
+      <h1 class="wh-title" id="wHTitle"></h1>
+      <p class="wh-sub" id="wHSub"></p>
+      <div class="wheat" aria-hidden="true"><i style="--i:0"></i><i class="h1" style="--i:1"></i><i style="--i:2"></i><i class="h2" style="--i:3"></i><i class="h1" style="--i:4"></i><i style="--i:5"></i><i style="--i:6"></i><i class="h1" style="--i:7"></i><i class="h2" style="--i:8"></i><i class="h3" style="--i:9"></i><i class="h2" style="--i:10"></i><i class="h4" style="--i:11"></i><i class="h1" style="--i:12"></i><i style="--i:13"></i><i class="h2" style="--i:14"></i><i class="h3" style="--i:15"></i><i style="--i:16"></i><i class="h1" style="--i:17"></i><i class="h2" style="--i:18"></i><i class="h2" style="--i:19"></i><i class="h3" style="--i:20"></i><i class="h4" style="--i:21"></i><i class="h3" style="--i:22"></i><i class="h4" style="--i:23"></i><i style="--i:24"></i><i class="h2" style="--i:25"></i><i class="h1" style="--i:26"></i><i style="--i:27"></i><i class="h3" style="--i:28"></i><i class="h2" style="--i:29"></i><i class="h4" style="--i:30"></i><i class="h3" style="--i:31"></i><i class="h2" style="--i:32"></i><i class="h3" style="--i:33"></i><i class="h4" style="--i:34"></i><i class="h4" style="--i:35"></i><i class="h2" style="--i:36"></i><i class="h1" style="--i:37"></i><i class="h3" style="--i:38"></i><i class="h1" style="--i:39"></i><i class="h2" style="--i:40"></i><i class="h3" style="--i:41"></i><i class="h4" style="--i:42"></i><i class="h4" style="--i:43"></i><i class="h3" style="--i:44"></i><i class="h4" style="--i:45"></i><i class="h2" style="--i:46"></i><i class="h4" style="--i:47"></i></div>
+      <ul class="wfeat">
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2M9.5 3h5"/></svg><span id="wHF1"></span></li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3c1 4 5 5.5 5 10a5 5 0 01-10 0c0-2 1-3 2-4 .3 1.4 1 2 2 2-1-3-.5-5 1-8z"/></svg><span id="wHF2"></span></li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 01-2 2H6a2 2 0 01-2-2V7a2 2 0 012-2h9"/></svg><span id="wHF3"></span></li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5"/><path d="M9 13h7M9 17h7"/></svg><span id="wHF4"></span></li>
+      </ul>
+      
+    </section>
+    <div class="wpage">
+      <main class="wcard">
+        <div class="wlogo"><span class="wlogo-ico" aria-hidden="true"><svg viewBox="0 0 64 64"><defs><linearGradient id="wlg" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient></defs><path d="M6 24 L32 16 L58 24 L58 52 L32 44 L6 52 Z" fill="url(#wlg)"/><path d="M32 16 V44" stroke="#0b1233" stroke-width="2.2"/><path d="M32 4 L52 12 L32 20 L12 12 Z" fill="#c4b5fd"/><path d="M22 16 V24 Q32 31 42 24 V16 L32 20 Z" fill="url(#wlg)"/><path d="M52 12 V24" stroke="#c4b5fd" stroke-width="2"/><circle cx="52" cy="27" r="2.6" fill="#c4b5fd"/></svg></span><div class="wlogo-t"><b id="wBrandA"></b> <em id="wBrandB"></em></div><p class="wlogo-tag" id="wBrandTag"></p></div>
+        
+        <div class="whead"><h2 id="welTitle"></h2><p class="wsub" id="wSub"></p></div>
+        <div class="wtabs" id="wTabs" role="tablist"><button type="button" id="tabLog" role="tab">Log in</button><button type="button" id="tabReg" role="tab">Create account</button></div>
+        <div id="gWrap">
+          <div class="wdiv" aria-hidden="true"><span></span><small id="gOr"></small><span></span></div>
+          <div class="wsoc">
+            <button type="button" class="wgbtn" id="gBtn"><span class="wg-ico"><svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.95 4 4 12.95 4 24s8.95 20 20 20 20-8.95 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg></span><span id="gBtnTxt"></span></button>
+            <button type="button" class="wgbtn wdis" id="fbBtn" disabled aria-disabled="true" title="Coming soon"><span class="wg-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="11" fill="#1877F2"/><path fill="#fff" d="M13.4 19v-5.5h1.8l.3-2.2h-2.1V10c0-.6.2-1.1 1.1-1.1h1.1V7c-.2 0-.9-.1-1.7-.1-1.7 0-2.9 1-2.9 2.9v1.5H9.1v2.2h1.9V19h2.4z"/></svg></span><span id="fbBtnTxt"></span></button>
+            <button type="button" class="wgbtn wdis" id="apBtn" disabled aria-disabled="true" title="Coming soon"><span class="wg-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#f5f5f7" d="M16.4 12.6c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.1-2.8.9-3.5.9s-1.8-.8-3-.8c-1.5 0-3 .9-3.8 2.3-1.6 2.8-.4 6.9 1.2 9.2.8 1.1 1.7 2.3 2.9 2.3 1.2 0 1.6-.8 3-.8s1.8.8 3 .8c1.2 0 2-1.1 2.8-2.2.9-1.3 1.2-2.5 1.2-2.6-.1 0-2.5-.9-2.5-3.8zM14.2 5.5c.6-.8 1.1-1.8.9-2.9-.9 0-2 .6-2.7 1.4-.6.7-1.1 1.8-.9 2.8 1 .1 2.1-.5 2.7-1.3z"/></svg></span><span id="apBtnTxt"></span></button>
+          </div>
+          <p class="wgerr" id="gErr" role="alert"></p>
+        </div>
+
+        <form id="formLog" novalidate>
+          <div class="wf"><label for="lgUser" id="lgL1"></label><div class="wic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg><input id="lgUser" maxlength="60" autocomplete="username" autocapitalize="off" spellcheck="false"></div><small id="lgH1"></small></div>
+          <div class="wf"><label for="lgPass" id="lgL2"></label><div class="wpw wic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg><input id="lgPass" type="password" maxlength="64" autocomplete="current-password"><button type="button" class="weye" id="eye_lgPass"></button></div><small id="lgH2"></small></div>
+          <div class="wrem"><label class="wchk"><input type="checkbox" id="rememberMe" checked><span id="remTxt"></span></label><button type="button" class="wlink" id="fpBtn"></button></div>
+          <p class="werr" id="lgErr" role="alert"></p>
+          <button type="submit" class="wbtn" id="lgBtn"></button>
+          <p class="wfoot"><span id="lgNoAcc"></span> <button type="button" class="wlink" id="goReg"></button></p>
+        </form>
+
+        <form id="formReset" novalidate hidden>
+          <div class="wf"><label for="rsUser" id="rsL1"></label><div class="wic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg><input id="rsUser" maxlength="60" autocomplete="username" autocapitalize="off" spellcheck="false" inputmode="email"></div></div>
+          <p class="werr" id="rsErr" role="alert"></p>
+          <p id="rsOk" role="status" aria-live="polite" style="color:var(--acc);font-weight:600;min-height:1.4em;margin:0 0 12px"></p>
+          <button type="submit" class="wbtn" id="rsBtn"></button>
+          <p class="wfoot"><button type="button" class="wlink" id="rsBack"></button></p>
+        </form>
+
+        <button type="button" class="wlink wcenter" id="savedBtn" hidden></button>
+
+        <form id="formReg" novalidate hidden>
+          <p class="wstep" id="wStep"></p>
+          <div class="wprog" aria-hidden="true"><i id="pg0" class="on"></i><i id="pg1"></i><i id="pg2"></i></div>
+
+          <section id="st0">
+            <h2 id="h0"></h2>
+            <div class="wf"><label for="rUser" id="lUser"></label><div class="wic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg><input id="rUser" maxlength="20" autocomplete="username" autocapitalize="off" spellcheck="false"></div><small id="hUser"></small></div>
+            <div class="wf"><label for="rPass" id="lPass"></label><div class="wpw wic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg><input id="rPass" type="password" maxlength="64" autocomplete="new-password"><button type="button" class="weye" id="eye_rPass"></button></div><small id="hPass"></small></div>
+            <div class="wpwm" id="pwm" data-s="0"><span class="wpwm-bars" aria-hidden="true"><i></i><i></i><i></i></span><span id="pwmTxt" aria-live="polite"></span></div>
+            <div class="wf"><label for="rPass2" id="lPass2"></label><div class="wpw wic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg><input id="rPass2" type="password" maxlength="64" autocomplete="new-password"><button type="button" class="weye" id="eye_rPass2"></button></div></div>
+          </section>
+
+          <section id="st1" hidden>
+            <h2 id="h1"></h2>
+            <div class="wf"><label for="rName" id="lName"></label><input id="rName" maxlength="40" autocomplete="name"><small id="hName"></small></div>
+            <div class="wf"><span class="wlbl" id="lDob"></span>
+              <div class="wdob">
+                <div><label for="rDay" id="lDay"></label><input id="rDay" inputmode="numeric" maxlength="2" autocomplete="off"></div>
+                <div><label for="rMon" id="lMon"></label><select id="rMon"></select></div>
+                <div><label for="rYear" id="lYear"></label><input id="rYear" inputmode="numeric" maxlength="4" autocomplete="off"></div>
+              </div>
+            </div>
+            <div class="wf"><label for="rGender" id="lGender"></label><select id="rGender"></select></div>
+            <div class="wf"><label for="rSchool" id="lSchool"></label><input id="rSchool" maxlength="80"></div>
+          </section>
+
+          <section id="st2" hidden>
+            <h2 id="h2"></h2>
+            <div class="wf"><span class="wlbl" id="lPhone"></span>
+              <div class="wphone"><select id="rCc" aria-label="Country code"></select><span class="wpfx" id="rPfx"></span><input id="rPhone" inputmode="numeric" maxlength="9"></div>
+            </div>
+            <div class="wf"><label for="rEmail" id="lEmail"></label><div class="wic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg><input id="rEmail" type="email" maxlength="60" autocomplete="email" placeholder="you@example.com"></div></div>
+            <div class="wf"><label for="rCountry" id="lCountry"></label><select id="rCountry"></select></div>
+            <div class="wrow">
+              <div class="wf"><label for="rDiv" id="lDiv"></label><select id="rDiv"></select><input id="rDivTxt" maxlength="60" hidden></div>
+              <div class="wf"><label for="rDist" id="lDist"></label><select id="rDist"></select><input id="rDistTxt" maxlength="60" hidden></div>
+            </div>
+            <div class="wf"><label for="rVill" id="lVill"></label><input id="rVill" maxlength="120"></div>
+            <label class="wchk wterms"><input type="checkbox" id="rTerms"><span id="lTerms"></span> <button type="button" class="wlink" id="termsLink"></button></label>
+          </section>
+
+          <p class="werr" id="rErr" role="alert"></p>
+          <div class="wbtns"><button type="button" class="wbtn ghost" id="rBack" hidden></button><button type="submit" class="wbtn" id="rNext"></button></div>
+          <p class="wfoot"><span id="rNoAcc"></span> <button type="button" class="wlink" id="goLog2"></button></p>
+        </form>
+
+        <section id="panelSaved" hidden>
+          <div id="wList"></div>
+          <p class="werr" id="sErr" role="alert"></p>
+          <button type="button" class="wbtn ghost wfull" id="savedBack"></button>
+        </section>
+      </main>
+      
+    </div>
+  </div>
+</div>
+
+<div id="peP" class="pep" hidden role="dialog" aria-modal="true" aria-labelledby="pepT">
+  <div class="pep-box">
+    <h2 id="pepT" data-i="pi.pepTitle">Profile picture</h2>
+    <div class="pep-stage"><canvas id="pepCv" width="440" height="440" role="img" aria-label="Preview"></canvas></div>
+    <div class="pep-ctl">
+      <label><span data-i="pi.pepZoom">Zoom</span><input id="pepZoom" type="range" min="1" max="3" step="0.01" value="1"></label>
+      <label><span data-i="pi.pepLR">Move left or right</span><input id="pepPanX" type="range" min="-100" max="100" step="1" value="0"></label>
+      <label><span data-i="pi.pepUD">Move up or down</span><input id="pepPanY" type="range" min="-100" max="100" step="1" value="0"></label>
+    </div>
+    <p class="small pep-sizes" data-i="pi.pepSizes">How it looks on your profile</p>
+    <div class="pep-sz">
+      <figure><canvas id="pepS" width="80" height="80" style="width:40px;height:40px"></canvas><figcaption data-i="pi.sizeS">Small</figcaption></figure>
+      <figure><canvas id="pepM" width="144" height="144" style="width:72px;height:72px"></canvas><figcaption data-i="pi.sizeM">Medium</figcaption></figure>
+      <figure><canvas id="pepL" width="224" height="224" style="width:112px;height:112px"></canvas><figcaption data-i="pi.sizeL">Large</figcaption></figure>
+    </div>
+    <p class="pep-err" id="pepErr" role="alert"></p>
+    <div class="pep-btns"><button type="button" id="pepCancel" data-i="pi.pepCancel">Cancel</button><button type="button" id="pepSave" class="primary" data-i="pi.pepSave">Save photo</button></div>
+  </div>
+</div>
+<script src="js/app.js"></script>
+
+</body>
+</html>
